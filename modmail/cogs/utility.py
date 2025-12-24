@@ -723,7 +723,7 @@ class Utility(commands.Cog):
             mention = []
             everyone = ("all", "everyone")
             for m in user_or_role:
-                if not isinstance(m, (discord.Role, discord.Member)) and m not in everyone:
+                if not isinstance(m, discord.Role | discord.Member) and m not in everyone:
                     raise commands.BadArgument(f'Role or Member "{m}" not found.')
                 elif m == ctx.guild.default_role or m in everyone:
                     mention.append("@everyone")

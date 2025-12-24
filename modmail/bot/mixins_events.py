@@ -616,7 +616,7 @@ class BotEventsMixin:
             if cog and cog.has_error_handler():
                 return
 
-        if isinstance(exception, (commands.BadArgument, commands.BadUnionArgument)):
+        if isinstance(exception, commands.BadArgument | commands.BadUnionArgument):
             try:
                 await context.typing()
             except Exception:

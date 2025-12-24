@@ -1219,7 +1219,7 @@ class Thread:
             return
         # We only ever send the menu to the main recipient
         user = self.recipient
-        if not isinstance(user, (discord.User, discord.Member)):
+        if not isinstance(user, discord.User | discord.Member):
             return
         # Ensure we have a DM channel
         dm: discord.DMChannel | None = getattr(user, "dm_channel", None)
