@@ -190,7 +190,7 @@ class Modmail(commands.Cog):
 
     @commands.group(aliases=["snippets"], invoke_without_command=True)
     @checks.has_permissions(PermissionLevel.SUPPORTER)
-    async def snippet(self, ctx, *, name: str.lower = None):
+    async def snippet(self, ctx, *, name: str = None):
         """
         Create pre-defined messages for use in threads.
 
@@ -267,7 +267,7 @@ class Modmail(commands.Cog):
 
     @snippet.command(name="raw")
     @checks.has_permissions(PermissionLevel.SUPPORTER)
-    async def snippet_raw(self, ctx, *, name: str.lower):
+    async def snippet_raw(self, ctx, *, name: str):
         """
         View the raw content of a snippet.
         """
@@ -286,7 +286,7 @@ class Modmail(commands.Cog):
 
     @snippet.command(name="add", aliases=["create", "make"])
     @checks.has_permissions(PermissionLevel.SUPPORTER)
-    async def snippet_add(self, ctx, name: str.lower, *, value: commands.clean_content):
+    async def snippet_add(self, ctx, name: str, *, value: commands.clean_content):
         """
         Add a snippet.
 
@@ -392,7 +392,7 @@ class Modmail(commands.Cog):
 
     @snippet.command(name="remove", aliases=["del", "delete"])
     @checks.has_permissions(PermissionLevel.SUPPORTER)
-    async def snippet_remove(self, ctx, *, name: str.lower):
+    async def snippet_remove(self, ctx, *, name: str):
         """Remove a snippet."""
         if name in self.bot.snippets:
             deleted_aliases, edited_aliases = self._fix_aliases(name)
@@ -446,7 +446,7 @@ class Modmail(commands.Cog):
 
     @snippet.command(name="edit")
     @checks.has_permissions(PermissionLevel.SUPPORTER)
-    async def snippet_edit(self, ctx, name: str.lower, *, value):
+    async def snippet_edit(self, ctx, name: str, *, value):
         """
         Edit a snippet.
 
@@ -622,7 +622,7 @@ class Modmail(commands.Cog):
     @commands.command(aliases=["alert"])
     @checks.has_permissions(PermissionLevel.SUPPORTER)
     @checks.thread_only()
-    async def notify(self, ctx, *, user_or_role: discord.Role | utils.User | str.lower | None = None):
+    async def notify(self, ctx, *, user_or_role: discord.Role | utils.User | str | None = None):
         """
         Notify a user or role when the next thread message received.
 
@@ -660,7 +660,7 @@ class Modmail(commands.Cog):
     @commands.command(aliases=["unalert"])
     @checks.has_permissions(PermissionLevel.SUPPORTER)
     @checks.thread_only()
-    async def unnotify(self, ctx, *, user_or_role: discord.Role | utils.User | str.lower | None = None):
+    async def unnotify(self, ctx, *, user_or_role: discord.Role | utils.User | str | None = None):
         """
         Un-notify a user, role, or yourself from a thread.
 
@@ -696,7 +696,7 @@ class Modmail(commands.Cog):
     @commands.command(aliases=["sub"])
     @checks.has_permissions(PermissionLevel.SUPPORTER)
     @checks.thread_only()
-    async def subscribe(self, ctx, *, user_or_role: discord.Role | utils.User | str.lower | None = None):
+    async def subscribe(self, ctx, *, user_or_role: discord.Role | utils.User | str | None = None):
         """
         Notify a user, role, or yourself for every thread message received.
 
@@ -734,7 +734,7 @@ class Modmail(commands.Cog):
     @commands.command(aliases=["unsub"])
     @checks.has_permissions(PermissionLevel.SUPPORTER)
     @checks.thread_only()
-    async def unsubscribe(self, ctx, *, user_or_role: discord.Role | utils.User | str.lower | None = None):
+    async def unsubscribe(self, ctx, *, user_or_role: discord.Role | utils.User | str | None = None):
         """
         Unsubscribe a user, role, or yourself from a thread.
 
