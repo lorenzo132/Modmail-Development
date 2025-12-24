@@ -28,7 +28,7 @@
   </a>
 
   <a href="https://www.python.org/downloads/">
-    <img src="https://img.shields.io/badge/Made%20With-Python%203.10-blue.svg?style=for-the-badge&logo=Python" alt="Made with Python 3.10">
+    <img src="https://img.shields.io/badge/Made%20With-Python%203.12%2B-blue.svg?style=for-the-badge&logo=Python" alt="Made with Python 3.12+">
   </a>
 
   <a href="https://github.com/ambv/black">
@@ -36,7 +36,7 @@
   </a>
 
   <a href="https://github.com/modmail-dev/modmail/blob/master/LICENSE">
-    <img src="https://img.shields.io/badge/license-agpl-e74c3c.svg?style=for-the-badge" alt="MIT License">
+    <img src="https://img.shields.io/badge/license-agpl-e74c3c.svg?style=for-the-badge" alt="AGPL License">
   </a>
 
 <br>

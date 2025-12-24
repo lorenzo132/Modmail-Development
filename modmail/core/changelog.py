@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 import asyncio
 import re
 from subprocess import PIPE
-from typing import List
 
 from discord import Embed
 
-from core.models import getLogger
-from core.utils import truncate
+from .models import getLogger
+from .utils import truncate
 
 logger = getLogger(__name__)
 
@@ -52,7 +53,7 @@ class Version:
         self.bot = bot
         self.version = version.lstrip("vV")
         self.lines = lines.strip()
-        self.fields = {}
+        self.fields: dict[str, str] = {}
         self.changelog_url = f"https://github.com/modmail-dev/modmail/blob/{branch}/CHANGELOG.md"
         self.description = ""
         self.parse()
@@ -64,8 +65,8 @@ class Version:
         """
         Parse the lines and split them into `description` and `fields`.
         """
-        self.description = re.match(self.DESCRIPTION_REGEX, self.lines, re.DOTALL)
-        self.description = self.description.group(1).strip() if self.description is not None else ""
+        description_match = re.match(self.DESCRIPTION_REGEX, self.lines, re.DOTALL)
+        self.description = description_match.group(1).strip() if description_match is not None else ""
 
         matches = re.finditer(self.ACTION_REGEX, self.lines, re.DOTALL)
         for m in matches:
@@ -137,7 +138,7 @@ class Changelog:
         self.bot = bot
         self.text = text
         logger.debug("Fetching changelog from GitHub.")
-        self.versions = [Version(bot, branch, *m) for m in self.VERSION_REGEX.findall(text)]
+        self.versions: list[Version] = [Version(bot, branch, *m) for m in self.VERSION_REGEX.findall(text)]
 
     @property
     def latest_version(self) -> Version:
@@ -147,14 +148,14 @@ class Changelog:
         return self.versions[0]
 
     @property
-    def embeds(self) -> List[Embed]:
+    def embeds(self) -> list[Embed]:
         """
-        List[Embed]: A list of `Embed`'s for each of the `Version`.
+        list[Embed]: A list of `Embed`'s for each of the `Version`.
         """
         return [v.embed for v in self.versions]
 
     @classmethod
-    async def from_url(cls, bot, url: str = "") -> "Changelog":
+    async def from_url(cls, bot, url: str = "") -> Changelog:
         """
         Create a `Changelog` from a URL.
 
@@ -176,10 +177,9 @@ class Changelog:
             stderr=PIPE,
             stdout=PIPE,
         )
-        err = await proc.stderr.read()
-        err = err.decode("utf-8").rstrip()
-        res = await proc.stdout.read()
-        branch = res.decode("utf-8").rstrip()
+        stdout, stderr = await proc.communicate()
+        err = stderr.decode("utf-8").rstrip()
+        branch = stdout.decode("utf-8").rstrip()
         if not branch or err:
             branch = "master" if not bot.version.is_prerelease else "development"
 

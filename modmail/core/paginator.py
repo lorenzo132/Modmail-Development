@@ -1,9 +1,13 @@
-import typing
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Callable
+from typing import Any
 
 import discord
-from discord import Message, Embed, ButtonStyle, Interaction
-from discord.ui import View, Button, Select
+from discord import ButtonStyle, Embed, Interaction, Message
 from discord.ext import commands
+from discord.ui import Button, Select, View
 
 
 class PaginatorSession:
@@ -41,26 +45,26 @@ class PaginatorSession:
         A select menu that will be added to the View.
     """
 
-    def __init__(self, ctx: commands.Context, *pages, **options):
+    def __init__(self, ctx: commands.Context, *pages: Any, **options: Any) -> None:
         self.ctx = ctx
         self.timeout: int = options.get("timeout", 210)
         self.running = False
-        self.base: Message = None
+        self.base: Message | None = None
         self.current = 0
         self.pages = list(pages)
         self.destination = options.get("destination", ctx)
-        self.view = None
-        self.select_menu = None
+        self.view: PaginatorView | None = None
+        self.select_menu: Select | None = None
 
-        self.callback_map = {
+        self.callback_map: dict[str, Callable[[], int]] = {
             "<<": self.first_page,
             "<": self.previous_page,
             ">": self.next_page,
             ">>": self.last_page,
         }
-        self._buttons_map = {"<<": None, "<": None, ">": None, ">>": None}
+        self._buttons_map: dict[str, PageButton | None] = {"<<": None, "<": None, ">": None, ">>": None}
 
-    async def show_page(self, index: int) -> typing.Optional[typing.Dict]:
+    async def show_page(self, index: int) -> dict[str, Any] | None:
         """
         Show a page by page number.
 
@@ -84,7 +88,7 @@ class PaginatorSession:
         self.update_disabled_status()
         return result
 
-    def update_disabled_status(self):
+    def update_disabled_status(self) -> None:
         if self.current == self.first_page():
             # disable << button
             if self._buttons_map["<<"] is not None:
@@ -113,7 +117,7 @@ class PaginatorSession:
             if self._buttons_map[">"] is not None:
                 self._buttons_map[">"].disabled = False
 
-    async def create_base(self, item) -> None:
+    async def create_base(self, item: Any) -> None:
         """
         Create a base `Message`.
         """
@@ -127,25 +131,25 @@ class PaginatorSession:
 
         await self._create_base(item, self.view)
 
-    async def _create_base(self, item, view: View) -> None:
+    async def _create_base(self, item: Any, view: View | None) -> None:
         raise NotImplementedError
 
-    def _show_page(self, page):
+    def _show_page(self, page: Any) -> dict[str, Any]:
         raise NotImplementedError
 
-    def first_page(self):
+    def first_page(self) -> int:
         """Returns the index of the first page"""
         return 0
 
-    def next_page(self):
+    def next_page(self) -> int:
         """Returns the index of the next page"""
         return min(self.current + 1, self.last_page())
 
-    def previous_page(self):
+    def previous_page(self) -> int:
         """Returns the index of the previous page"""
         return max(self.current - 1, self.first_page())
 
-    def last_page(self):
+    def last_page(self) -> int:
         """Returns the index of the last page"""
         return len(self.pages) - 1
 
@@ -161,20 +165,18 @@ class PaginatorSession:
         # returns immediately (prevents typing indicator from hanging).
         if self.view is not None:
 
-            async def _wait_and_close():
+            async def _wait_and_close() -> None:
                 try:
                     await self.view.wait()
                 finally:
                     await self.close(delete=False)
 
             # Fire and forget
-            self.ctx.bot.loop.create_task(_wait_and_close())
+            asyncio.create_task(_wait_and_close())
         else:
             await self.close(delete=False)
 
-    async def close(
-        self, delete: bool = True, *, interaction: Interaction = None
-    ) -> typing.Optional[Message]:
+    async def close(self, delete: bool = True, *, interaction: Interaction | None = None) -> Message | None:
         """
         Closes the pagination session.
 
@@ -193,10 +195,7 @@ class PaginatorSession:
             sent_emoji, _ = await self.ctx.bot.retrieve_emoji()
             await self.ctx.bot.add_reaction(self.ctx.message, sent_emoji)
 
-            if interaction:
-                message = interaction.message
-            else:
-                message = self.base
+            message = interaction.message if interaction else self.base
 
             self.running = False
 
@@ -207,6 +206,10 @@ class PaginatorSession:
                 else:
                     self.view.clear_items()
                     await message.edit(view=self.view)
+
+            return message
+
+        return interaction.message if interaction else self.base
 
 
 class PaginatorView(View):
@@ -228,16 +231,16 @@ class PaginatorView(View):
         How long to wait for before the session closes.
     """
 
-    def __init__(self, handler: PaginatorSession, *args, **kwargs):
+    def __init__(self, handler: PaginatorSession, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.handler = handler
         self.clear_items()  # clear first so we can control the order
         self.fill_items()
 
-    async def stop_callback(self, interaction: Interaction):
+    async def stop_callback(self, interaction: Interaction) -> None:
         await self.handler.close(interaction=interaction)
 
-    def fill_items(self):
+    def fill_items(self) -> None:
         if self.handler.select_menu is not None:
             self.add_item(self.handler.select_menu)
 
@@ -245,10 +248,7 @@ class PaginatorView(View):
             if len(self.handler.pages) == 2 and label in ("<<", ">>"):
                 continue
 
-            if label in ("<<", ">>"):
-                style = ButtonStyle.secondary
-            else:
-                style = ButtonStyle.primary
+            style = ButtonStyle.secondary if label in ("<<", ">>") else ButtonStyle.primary
 
             button = PageButton(self.handler, callback, label=label, style=style)
 
@@ -259,7 +259,7 @@ class PaginatorView(View):
         stop_button.callback = self.stop_callback
         self.add_item(stop_button)
 
-    async def interaction_check(self, interaction: Interaction):
+    async def interaction_check(self, interaction: Interaction) -> bool:
         """Only allow the message author to interact"""
         if interaction.user != self.handler.ctx.author:
             await interaction.response.send_message(
@@ -288,18 +288,25 @@ class PageButton(Button):
         A callable that returns an int of the page to go to.
     """
 
-    def __init__(self, handler, page_callback, **kwargs):
+    def __init__(
+        self,
+        handler: PaginatorSession,
+        page_callback: Callable[[], int],
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.handler = handler
         self.page_callback = page_callback
 
-    async def callback(self, interaction: Interaction):
+    async def callback(self, interaction: Interaction) -> None:
         kwargs = await self.handler.show_page(self.page_callback())
+        if kwargs is None:
+            return
         await interaction.response.edit_message(**kwargs, view=self.view)
 
 
 class PageSelect(Select):
-    def __init__(self, handler: PaginatorSession, pages: typing.List[typing.Tuple[str]]):
+    def __init__(self, handler: PaginatorSession, pages: list[tuple[str, str]]):
         self.handler = handler
         options = []
         for n, (label, description) in enumerate(pages):
@@ -308,14 +315,16 @@ class PageSelect(Select):
         options = options[:25]  # max 25 options
         super().__init__(placeholder="Select a page", min_values=1, max_values=1, options=options)
 
-    async def callback(self, interaction: Interaction):
+    async def callback(self, interaction: Interaction) -> None:
         page = int(self.values[0])
         kwargs = await self.handler.show_page(page)
+        if kwargs is None:
+            return
         await interaction.response.edit_message(**kwargs, view=self.view)
 
 
 class EmbedPaginatorSession(PaginatorSession):
-    def __init__(self, ctx: commands.Context, *embeds, **options):
+    def __init__(self, ctx: commands.Context, *embeds: Embed, **options: Any) -> None:
         super().__init__(ctx, *embeds, **options)
 
         if len(self.pages) > 1:
@@ -352,9 +361,8 @@ class EmbedPaginatorSession(PaginatorSession):
                     description = ""
                 select_options.append((title, description))
 
-            if create_select:
-                if len(set(x[0] for x in select_options)) != 1:  # must have unique authors
-                    self.select_menu = PageSelect(self, select_options)
+            if create_select and len({x[0] for x in select_options}) != 1:  # must have unique authors
+                self.select_menu = PageSelect(self, select_options)
 
     def add_page(self, item: Embed) -> None:
         if isinstance(item, Embed):
@@ -362,15 +370,17 @@ class EmbedPaginatorSession(PaginatorSession):
         else:
             raise TypeError("Page must be an Embed object.")
 
-    async def _create_base(self, item: Embed, view: View) -> None:
+    async def _create_base(self, item: Embed, view: View | None) -> None:
         self.base = await self.destination.send(embed=item, view=view)
 
-    def _show_page(self, page):
-        return dict(embed=page)
+    def _show_page(self, page: Embed) -> dict[str, Any]:
+        return {"embed": page}
 
 
 class MessagePaginatorSession(PaginatorSession):
-    def __init__(self, ctx: commands.Context, *messages, embed: Embed = None, **options):
+    def __init__(
+        self, ctx: commands.Context, *messages: str, embed: Embed | None = None, **options: Any
+    ) -> None:
         self.embed = embed
         self.footer_text = self.embed.footer.text if embed is not None else None
         super().__init__(ctx, *messages, **options)
@@ -381,7 +391,7 @@ class MessagePaginatorSession(PaginatorSession):
         else:
             raise TypeError("Page must be a str object.")
 
-    def _set_footer(self):
+    def _set_footer(self) -> None:
         if self.embed is not None:
             footer_text = f"Page {self.current + 1} of {len(self.pages)}"
             if self.footer_text:
@@ -394,10 +404,10 @@ class MessagePaginatorSession(PaginatorSession):
 
             self.embed.set_footer(text=footer_text, icon_url=icon_url)
 
-    async def _create_base(self, item: str, view: View) -> None:
+    async def _create_base(self, item: str, view: View | None) -> None:
         self._set_footer()
         self.base = await self.ctx.send(content=item, embed=self.embed, view=view)
 
-    def _show_page(self, page) -> typing.Dict:
+    def _show_page(self, page: str) -> dict[str, Any]:
         self._set_footer()
-        return dict(content=page, embed=self.embed)
+        return {"content": page, "embed": self.embed}

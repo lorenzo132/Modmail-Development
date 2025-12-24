@@ -1,43 +1,51 @@
+from __future__ import annotations
+
+import _string
 import json
 import logging
 import os
 import re
 import sys
-import _string
-
 from difflib import get_close_matches
 from enum import IntEnum
-from logging import FileHandler, StreamHandler, Handler
+from logging import FileHandler, Handler, StreamHandler
 from logging.handlers import RotatingFileHandler
 from string import Formatter
-from typing import Dict, Optional
+from typing import cast
 
 import discord
 from discord.ext import commands
 
-
 try:
     from colorama import Fore, Style
 except ImportError:
-    Fore = Style = type("Dummy", (object,), {"__getattr__": lambda self, item: ""})()
+    Fore = Style = None
 
-
+# Disable colorama in Heroku environment
 if ".heroku" in os.environ.get("PYTHONHOME", ""):
-    # heroku
-    Fore = Style = type("Dummy", (object,), {"__getattr__": lambda self, item: ""})()
+    Fore = Style = None
+
+
+class _DummyColorama:
+    def __getattr__(self, item: str) -> str:
+        return ""
+
+
+if Fore is None or Style is None:
+    Fore = Style = _DummyColorama()
 
 
 class ModmailLogger(logging.Logger):
     @staticmethod
-    def _debug_(*msgs):
+    def _debug_(*msgs: str) -> str:
         return f"{Fore.CYAN}{' '.join(msgs)}{Style.RESET_ALL}"
 
     @staticmethod
-    def _info_(*msgs):
+    def _info_(*msgs: str) -> str:
         return f"{Fore.LIGHTMAGENTA_EX}{' '.join(msgs)}{Style.RESET_ALL}"
 
     @staticmethod
-    def _error_(*msgs):
+    def _error_(*msgs: str) -> str:
         return f"{Fore.RED}{' '.join(msgs)}{Style.RESET_ALL}"
 
     def debug(self, msg, *args, **kwargs):
@@ -81,7 +89,7 @@ class JsonFormatter(logging.Formatter):
 
     Parameters
     ----------
-    fmt_dict : Optional[Dict[str, str]]
+    fmt_dict : dict[str, str] | None
         {key: logging format attribute} pairs. Defaults to {"message": "message"}.
     time_format: str
         time.strftime() format string. Default: "%Y-%m-%dT%H:%M:%S"
@@ -91,14 +99,14 @@ class JsonFormatter(logging.Formatter):
 
     def __init__(
         self,
-        fmt_dict: Optional[Dict[str, str]] = None,
+        fmt_dict: dict[str, str] | None = None,
         time_format: str = "%Y-%m-%dT%H:%M:%S",
         msec_format: str = "%s.%03dZ",
-    ):
-        self.fmt_dict: Dict[str, str] = fmt_dict if fmt_dict is not None else {"message": "message"}
+    ) -> None:
+        self.fmt_dict: dict[str, str] = fmt_dict or {"message": "message"}
         self.default_time_format: str = time_format
         self.default_msec_format: str = msec_format
-        self.datefmt: Optional[str] = None
+        self.datefmt: str | None = None
 
     def usesTime(self) -> bool:
         """
@@ -106,14 +114,14 @@ class JsonFormatter(logging.Formatter):
         """
         return "asctime" in self.fmt_dict.values()
 
-    def formatMessage(self, record) -> Dict[str, str]:
+    def formatMessage(self, record: logging.LogRecord) -> dict[str, str]:
         """
         Overwritten to return a dictionary of the relevant LogRecord attributes instead of a string.
         KeyError is raised if an unknown attribute is provided in the fmt_dict.
         """
         return {fmt_key: record.__dict__[fmt_val] for fmt_key, fmt_val in self.fmt_dict.items()}
 
-    def format(self, record) -> str:
+    def format(self, record: logging.LogRecord) -> str:
         """
         Mostly the same as the parent's class method, the difference being that a dict is manipulated and dumped as JSON
         instead of a string.
@@ -125,11 +133,10 @@ class JsonFormatter(logging.Formatter):
 
         message_dict = self.formatMessage(record)
 
-        if record.exc_info:
+        if record.exc_info and not record.exc_text:
             # Cache the traceback text to avoid converting it multiple times
             # (it's constant anyway)
-            if not record.exc_text:
-                record.exc_text = self.formatException(record.exc_info)
+            record.exc_text = self.formatException(record.exc_info)
 
         if record.exc_text:
             message_dict["exc_info"] = record.exc_text
@@ -143,8 +150,8 @@ class JsonFormatter(logging.Formatter):
 class FileFormatter(logging.Formatter):
     ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 
-    def format(self, record):
-        record.msg = self.ansi_escape.sub("", record.msg)
+    def format(self, record: logging.LogRecord) -> str:
+        record.msg = self.ansi_escape.sub("", str(record.msg))
         return super().format(record)
 
 
@@ -173,7 +180,7 @@ json_formatter = JsonFormatter(
 
 
 def create_log_handler(
-    filename: Optional[str] = None,
+    filename: str | None = None,
     *,
     rotating: bool = False,
     level: int = logging.DEBUG,
@@ -182,7 +189,7 @@ def create_log_handler(
     format: str = "plain",
     maxBytes: int = 28000000,
     backupCount: int = 1,
-    **kwargs,
+    **kwargs: object,
 ) -> Handler:
     """
     Creates a pre-configured log handler. This function is made for consistency's sake with
@@ -193,7 +200,7 @@ def create_log_handler(
 
     Parameters
     ----------
-    filename : Optional[Path]
+    filename : str | None
         Specifies that a `FileHandler` or `RotatingFileHandler` be created, using the specified filename,
         rather than a `StreamHandler`. Defaults to `None`.
     rotating : bool
@@ -251,23 +258,23 @@ def create_log_handler(
 
 logging.setLoggerClass(ModmailLogger)
 log_level = logging.INFO
-loggers = set()
+loggers: set[logging.Logger] = set()
 
 ch = create_log_handler(level=log_level)
-ch_debug: Optional[RotatingFileHandler] = None
+ch_debug: RotatingFileHandler | None = None
 
 
-def getLogger(name=None) -> ModmailLogger:
+def getLogger(name: str | None = None) -> ModmailLogger:
     logger = logging.getLogger(name)
     logger.setLevel(log_level)
     logger.addHandler(ch)
     if ch_debug is not None:
         logger.addHandler(ch_debug)
     loggers.add(logger)
-    return logger
+    return cast(ModmailLogger, logger)
 
 
-def configure_logging(bot) -> None:
+def configure_logging(bot: object) -> None:
     global ch_debug, log_level, ch
 
     stream_log_format, file_log_format = (
@@ -279,7 +286,7 @@ def configure_logging(bot) -> None:
 
     logger = getLogger(__name__)
     level_text = bot.config["log_level"].upper()
-    logging_levels = {
+    logging_levels: dict[str, int] = {
         "CRITICAL": logging.CRITICAL,
         "ERROR": logging.ERROR,
         "WARNING": logging.WARNING,
@@ -341,12 +348,12 @@ def configure_logging(bot) -> None:
 
 
 class InvalidConfigError(commands.BadArgument):
-    def __init__(self, msg, *args):
+    def __init__(self, msg: str, *args: object):
         super().__init__(msg, *args)
         self.msg = msg
 
     @property
-    def embed(self):
+    def embed(self) -> discord.Embed:
         # Single reference of Color.red()
         return discord.Embed(title="Error", description=self.msg, color=discord.Color.red())
 
@@ -405,7 +412,7 @@ class SimilarCategoryConverter(commands.CategoryChannelConverter):
 
         try:
             return await super().convert(ctx, argument)
-        except commands.ChannelNotFound:
+        except commands.ChannelNotFound as exc:
             if guild:
                 categories = {c.name.casefold(): c for c in guild.categories}
             else:
@@ -420,7 +427,7 @@ class SimilarCategoryConverter(commands.CategoryChannelConverter):
                 result = categories[result[0]]
 
             if not isinstance(result, discord.CategoryChannel):
-                raise commands.ChannelNotFound(argument)
+                raise commands.ChannelNotFound(argument) from exc
 
         return result
 

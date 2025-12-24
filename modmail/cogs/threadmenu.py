@@ -1,12 +1,14 @@
+from __future__ import annotations
+
+import contextlib
 import json
-import asyncio
-from copy import copy as _copy
+from typing import Any
 
 import discord
 from discord.ext import commands
 
-from core import checks
-from core.models import PermissionLevel
+from modmail.core import checks
+from modmail.core.models import PermissionLevel
 
 
 class ThreadCreationMenuCore(commands.Cog):
@@ -16,11 +18,11 @@ class ThreadCreationMenuCore(commands.Cog):
     but stores settings in core config (no plugin DB).
     """
 
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
     # ----- helpers -----
-    def _get_conf(self) -> dict:
+    def _get_conf(self) -> dict[str, Any]:
         return {
             "enabled": bool(self.bot.config.get("thread_creation_menu_enabled")),
             "options": self.bot.config.get("thread_creation_menu_options") or {},
@@ -39,7 +41,7 @@ class ThreadCreationMenuCore(commands.Cog):
             "embed_color": self.bot.config.get("thread_creation_menu_embed_color"),
         }
 
-    async def _save_conf(self, conf: dict):
+    async def _save_conf(self, conf: dict[str, Any]) -> None:
         await self.bot.config.set("thread_creation_menu_enabled", conf.get("enabled", False))
         await self.bot.config.set("thread_creation_menu_options", conf.get("options", {}), convert=False)
         await self.bot.config.set("thread_creation_menu_submenus", conf.get("submenus", {}), convert=False)
@@ -62,22 +64,20 @@ class ThreadCreationMenuCore(commands.Cog):
             "thread_creation_menu_embed_footer_icon_url", conf.get("embed_footer_icon_url")
         )
         if conf.get("embed_color"):
-            try:
+            with contextlib.suppress(Exception):
                 await self.bot.config.set("thread_creation_menu_embed_color", conf.get("embed_color"))
-            except Exception:
-                pass
         await self.bot.config.update()
 
     # ----- commands -----
     @checks.has_permissions(PermissionLevel.ADMINISTRATOR)
     @commands.group(invoke_without_command=True)
-    async def threadmenu(self, ctx):
+    async def threadmenu(self, ctx: commands.Context) -> None:
         """Thread-creation menu settings (core)."""
         await ctx.send_help(ctx.command)
 
     @checks.has_permissions(PermissionLevel.ADMINISTRATOR)
     @threadmenu.command(name="toggle")
-    async def threadmenu_toggle(self, ctx):
+    async def threadmenu_toggle(self, ctx: commands.Context) -> None:
         """Enable or disable the thread-creation menu.
 
         Toggles the global on/off state. When disabled, users won't see
@@ -90,7 +90,7 @@ class ThreadCreationMenuCore(commands.Cog):
 
     @checks.has_permissions(PermissionLevel.ADMINISTRATOR)
     @threadmenu.command(name="show")
-    async def threadmenu_show(self, ctx):
+    async def threadmenu_show(self, ctx: commands.Context) -> None:
         """Show all current main-menu options.
 
         Lists every option (label + description) configured in the root
@@ -107,7 +107,7 @@ class ThreadCreationMenuCore(commands.Cog):
     # ----- options -----
     @checks.has_permissions(PermissionLevel.ADMINISTRATOR)
     @threadmenu.group(name="option", invoke_without_command=True)
-    async def threadmenu_option(self, ctx):
+    async def threadmenu_option(self, ctx: commands.Context) -> None:
         """Manage main-menu options (add/remove/edit/show).
 
         Use subcommands:
@@ -120,7 +120,7 @@ class ThreadCreationMenuCore(commands.Cog):
 
     @checks.has_permissions(PermissionLevel.ADMINISTRATOR)
     @threadmenu_option.command(name="show")
-    async def threadmenu_option_show(self, ctx, *, label: str):
+    async def threadmenu_option_show(self, ctx: commands.Context, *, label: str) -> None:
         """Show detailed information about a main-menu option."""
         conf = self._get_conf()
         key = label.lower().replace(" ", "_")
@@ -147,7 +147,7 @@ class ThreadCreationMenuCore(commands.Cog):
 
     @checks.has_permissions(PermissionLevel.ADMINISTRATOR)
     @threadmenu_option.command(name="add")
-    async def threadmenu_option_add(self, ctx):
+    async def threadmenu_option_add(self, ctx: commands.Context) -> None:
         """Interactive wizard to add a main-menu option."""
         conf = self._get_conf()
 
@@ -769,7 +769,7 @@ class ThreadCreationMenuCore(commands.Cog):
 
         try:
             reply = await self.bot.wait_for("message", check=check, timeout=30)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return await ctx.send("Timed out — reset cancelled.")
 
         if reply.content.strip().lower() != "confirm":
@@ -777,7 +777,7 @@ class ThreadCreationMenuCore(commands.Cog):
 
         # Reset all `thread_creation_menu_` keys to defaults
         defaults = getattr(self.bot.config, "defaults", {})
-        keys = [k for k in defaults.keys() if k.startswith("thread_creation_menu_")]
+        keys = [k for k in defaults if k.startswith("thread_creation_menu_")]
 
         # Ensure we handle mappings without unwanted conversion
         for k in keys:

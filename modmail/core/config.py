@@ -1,20 +1,22 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import os
 import re
-import typing
+from collections.abc import ItemsView
 from copy import deepcopy
-
-from dotenv import load_dotenv
-import isodate
+from typing import Any
 
 import discord
+import isodate
 from discord.ext.commands import BadArgument
+from dotenv import load_dotenv
 
-from core._color_data import ALL_COLORS
-from core.models import DMDisabled, InvalidConfigError, Default, getLogger
-from core.time import UserFriendlyTime
-from core.utils import strtobool
+from ._color_data import ALL_COLORS
+from .models import Default, DMDisabled, InvalidConfigError, getLogger
+from .time import UserFriendlyTime
+from .utils import strtobool
 
 logger = getLogger(__name__)
 load_dotenv()
@@ -274,7 +276,6 @@ class ConfigManager:
         "anonymous_snippets",
         "plain_snippets",
         "require_close_reason",
-        "recipient_thread_close",
         "thread_show_roles",
         "thread_show_account_age",
         "thread_show_join_age",
@@ -304,16 +305,16 @@ class ConfigManager:
     defaults = {**public_keys, **private_keys, **protected_keys}
     all_keys = set(defaults.keys())
 
-    def __init__(self, bot):
+    def __init__(self, bot: object) -> None:
         self.bot = bot
-        self._cache = {}
+        self._cache: dict[str, Any] = {}
         self.ready_event = asyncio.Event()
-        self.config_help = {}
+        self.config_help: dict[str, str] = {}
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return repr(self._cache)
 
-    def populate_cache(self) -> dict:
+    def populate_cache(self) -> dict[str, Any]:
         data = deepcopy(self.defaults)
 
         # populate from env var and .env file
@@ -321,7 +322,7 @@ class ConfigManager:
         config_json = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
         if os.path.exists(config_json):
             logger.debug("Loading envs from config.json.")
-            with open(config_json, "r", encoding="utf-8") as f:
+            with open(config_json, encoding="utf-8") as f:
                 # Config json should override env vars
                 try:
                     data.update({k.lower(): v for k, v in json.load(f).items() if k.lower() in self.all_keys})
@@ -331,16 +332,16 @@ class ConfigManager:
         self._cache = data
 
         config_help_json = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config_help.json")
-        with open(config_help_json, "r", encoding="utf-8") as f:
+        with open(config_help_json, encoding="utf-8") as f:
             self.config_help = dict(sorted(json.load(f).items()))
 
         return self._cache
 
-    async def update(self):
+    async def update(self) -> None:
         """Updates the config with data from the cache"""
         await self.bot.api.update_config(self.filter_default(self._cache))
 
-    async def refresh(self) -> dict:
+    async def refresh(self) -> dict[str, Any]:
         """Refreshes internal cache with data from database"""
         for k, v in (await self.bot.api.get_config()).items():
             k = k.lower()
@@ -354,21 +355,21 @@ class ConfigManager:
     async def wait_until_ready(self) -> None:
         await self.ready_event.wait()
 
-    def __setitem__(self, key: str, item: typing.Any) -> None:
+    def __setitem__(self, key: str, item: Any) -> None:
         key = key.lower()
         logger.info("Setting %s.", key)
         if key not in self.all_keys:
             raise InvalidConfigError(f'Configuration "{key}" is invalid.')
         self._cache[key] = item
 
-    def __getitem__(self, key: str) -> typing.Any:
+    def __getitem__(self, key: str) -> Any:
         # make use of the custom methods in func:get:
         return self.get(key)
 
     def __delitem__(self, key: str) -> None:
         return self.remove(key)
 
-    def get(self, key: str, *, convert: bool = True) -> typing.Any:
+    def get(self, key: str, *, convert: bool = True) -> Any:
         key = key.lower()
         if key not in self.all_keys:
             raise InvalidConfigError(f'Configuration "{key}" is invalid.')
@@ -445,13 +446,16 @@ class ConfigManager:
 
         return value
 
-    async def set(self, key: str, item: typing.Any, convert=True) -> None:
+    async def set(self, key: str, item: Any, convert: bool = True) -> None:
         if not convert:
             return self.__setitem__(key, item)
 
-        if "channel" in key or "category" in key:
-            if isinstance(item, str) and item not in {"thread", "NONE"}:
-                item = item.strip("<#>")
+        if (
+            ("channel" in key or "category" in key)
+            and isinstance(item, str)
+            and item not in {"thread", "NONE"}
+        ):
+            item = item.strip("<#>")
 
         if key in self.colors:
             try:
@@ -464,8 +468,8 @@ class ConfigManager:
                     raise InvalidConfigError("Invalid color name or hex.")
                 try:
                     int(hex_, 16)
-                except ValueError:
-                    raise InvalidConfigError("Invalid color name or hex.")
+                except ValueError as exc:
+                    raise InvalidConfigError("Invalid color name or hex.") from exc
 
             except InvalidConfigError:
                 name = str(item).lower()
@@ -488,13 +492,13 @@ class ConfigManager:
                     if time.arg:
                         raise ValueError
                 except BadArgument as exc:
-                    raise InvalidConfigError(*exc.args)
-                except Exception as e:
-                    logger.debug(e)
+                    raise InvalidConfigError(*exc.args) from exc
+                except Exception as exc:
+                    logger.debug(exc)
                     raise InvalidConfigError(
                         "Unrecognized time, please use ISO-8601 duration format "
                         'string or a simpler "human readable" time.'
-                    )
+                    ) from exc
                 now = discord.utils.utcnow()
                 item = isodate.duration_isoformat(time.dt - now)
             return self.__setitem__(key, item)
@@ -502,8 +506,8 @@ class ConfigManager:
         if key in self.booleans:
             try:
                 return self.__setitem__(key, strtobool(item))
-            except ValueError:
-                raise InvalidConfigError("Must be a yes/no value.")
+            except ValueError as exc:
+                raise InvalidConfigError("Must be a yes/no value.") from exc
 
         elif key in self.duration_seconds:
             if isinstance(item, int):
@@ -514,24 +518,23 @@ class ConfigManager:
                 if time.arg:
                     raise ValueError
             except BadArgument as exc:
-                raise InvalidConfigError(*exc.args)
-            except Exception as e:
-                logger.debug(e)
+                raise InvalidConfigError(*exc.args) from exc
+            except Exception as exc:
+                logger.debug(exc)
                 raise InvalidConfigError(
                     "Unrecognized time, please use a duration like '5 days' or '2 hours'."
-                )
+                ) from exc
             now = discord.utils.utcnow()
             duration_seconds = int((time.dt - now).total_seconds())
             return self.__setitem__(key, duration_seconds)
 
-        elif key in self.enums:
-            if isinstance(item, self.enums[key]):
-                # value is an enum type
-                item = item.value
+        elif key in self.enums and isinstance(item, self.enums[key]):
+            # value is an enum type
+            item = item.value
 
         return self.__setitem__(key, item)
 
-    def remove(self, key: str) -> typing.Any:
+    def remove(self, key: str) -> Any:
         key = key.lower()
         logger.info("Removing %s.", key)
         if key not in self.all_keys:
@@ -541,11 +544,11 @@ class ConfigManager:
         self._cache[key] = deepcopy(self.defaults[key])
         return self._cache[key]
 
-    def items(self) -> typing.Iterable:
+    def items(self) -> ItemsView[str, Any]:
         return self._cache.items()
 
     @classmethod
-    def filter_valid(cls, data: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+    def filter_valid(cls, data: dict[str, Any]) -> dict[str, Any]:
         return {
             k.lower(): v
             for k, v in data.items()
@@ -553,7 +556,7 @@ class ConfigManager:
         }
 
     @classmethod
-    def filter_default(cls, data: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+    def filter_default(cls, data: dict[str, Any]) -> dict[str, Any]:
         # TODO: use .get to prevent errors
         filtered = {}
         for k, v in data.items():

@@ -1,17 +1,18 @@
+from __future__ import annotations
+
 import secrets
 import sys
 from json import JSONDecodeError
-from typing import Any, Dict, Union, Optional
+from typing import Any
 
 import discord
-from discord import Member, DMChannel, TextChannel, Message
+from aiohttp import ClientResponse, ClientResponseError
+from discord import DMChannel, Member, Message, TextChannel
 from discord.ext import commands
-
-from aiohttp import ClientResponseError, ClientResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import ConfigurationError
 
-from core.models import InvalidConfigError, getLogger
+from .models import InvalidConfigError, getLogger
 
 logger = getLogger(__name__)
 
@@ -71,7 +72,7 @@ class GitHub:
     def __init__(self, bot, access_token: str = "", username: str = "", **kwargs):
         self.bot = bot
         self.session = bot.session
-        self.headers: Optional[dict] = None
+        self.headers: dict | None = None
         self.access_token = access_token
         self.username = username
         self.avatar_url: str = kwargs.pop("avatar_url", "")
@@ -87,11 +88,11 @@ class GitHub:
         self,
         url: str,
         method: str = "GET",
-        payload: dict = None,
-        headers: dict = None,
+        payload: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
         return_response: bool = False,
         read_before_return: bool = False,
-    ) -> Union[ClientResponse, Dict[str, Any], str]:
+    ) -> ClientResponse | dict[str, Any] | list[Any] | str:
         """
         Makes a HTTP request.
 
@@ -120,10 +121,11 @@ class GitHub:
             `str` if the returned data is not a valid json data,
             the raw response.
         """
-        if headers is not None:
-            headers.update(self.headers)
-        else:
-            headers = self.headers
+        if self.headers:
+            if headers is not None:
+                headers.update(self.headers)
+            else:
+                headers = self.headers
         async with self.session.request(method, url, headers=headers, json=payload) as resp:
             if return_response:
                 if read_before_return:
@@ -135,7 +137,7 @@ class GitHub:
     @staticmethod
     async def _get_response_data(
         response: ClientResponse,
-    ) -> Union[Dict[str, Any], str]:
+    ) -> dict[str, Any] | list[Any] | str:
         """
         Internal method to convert the response data to `dict` if the data is a
         json object, or to `str` (raw response) if the data is not a valid json.
@@ -145,7 +147,7 @@ class GitHub:
         except (JSONDecodeError, ClientResponseError):
             return await response.text()
 
-    def filter_valid(self, data) -> Dict[str, Any]:
+    def filter_valid(self, data) -> dict[str, Any]:
         """
         Filters configuration keys that are accepted.
 
@@ -162,7 +164,7 @@ class GitHub:
         valid_keys = self.bot.config.valid_keys.difference(self.bot.config.protected_keys)
         return {k: v for k, v in data.items() if k in valid_keys}
 
-    async def update_repository(self, sha: str = None) -> Dict[str, Any]:
+    async def update_repository(self, sha: str | None = None) -> dict[str, Any]:
         """
         Update the repository from Modmail main repo.
 
@@ -256,7 +258,7 @@ class GitHub:
         )
 
     @classmethod
-    async def login(cls, bot) -> "GitHub":
+    async def login(cls, bot) -> GitHub:
         """
         Logs in to GitHub with configuration variable information.
 
@@ -271,7 +273,7 @@ class GitHub:
             The newly created `GitHub` object.
         """
         self = cls(bot, bot.config.get("github_token"))
-        resp: Dict[str, Any] = await self.request(self.BASE + "/user")
+        resp: dict[str, Any] = await self.request(self.BASE + "/user")
         if resp.get("login"):
             self.username = resp["login"]
             self.avatar_url = resp["avatar_url"]
@@ -308,10 +310,10 @@ class ApiClient:
         self,
         url: str,
         method: str = "GET",
-        payload: dict = None,
+        payload: dict[str, Any] | None = None,
         return_response: bool = False,
-        headers: dict = None,
-    ) -> Union[ClientResponse, dict, str]:
+        headers: dict[str, str] | None = None,
+    ) -> ClientResponse | dict[str, Any] | list[Any] | str:
         """
         Makes a HTTP request.
 
@@ -355,25 +357,25 @@ class ApiClient:
     async def validate_database_connection(self):
         return NotImplemented
 
-    async def get_user_logs(self, user_id: Union[str, int]) -> list:
+    async def get_user_logs(self, user_id: str | int) -> list:
         return NotImplemented
 
     async def find_log_entry(self, key: str) -> list:
         return NotImplemented
 
-    async def get_latest_user_logs(self, user_id: Union[str, int]):
+    async def get_latest_user_logs(self, user_id: str | int):
         return NotImplemented
 
-    async def get_responded_logs(self, user_id: Union[str, int]) -> list:
+    async def get_responded_logs(self, user_id: str | int) -> list:
         return NotImplemented
 
     async def get_open_logs(self) -> list:
         return NotImplemented
 
-    async def get_log(self, channel_id: Union[str, int]) -> dict:
+    async def get_log(self, channel_id: str | int) -> dict:
         return NotImplemented
 
-    async def get_log_link(self, channel_id: Union[str, int]) -> str:
+    async def get_log_link(self, channel_id: str | int) -> str:
         return NotImplemented
 
     async def create_log_entry(self, recipient: Member, channel: TextChannel, creator: Member) -> str:
@@ -388,7 +390,7 @@ class ApiClient:
     async def update_config(self, data: dict):
         return NotImplemented
 
-    async def edit_message(self, message_id: Union[int, str], new_content: str):
+    async def edit_message(self, message_id: int | str, new_content: str):
         return NotImplemented
 
     async def append_log(
@@ -401,16 +403,16 @@ class ApiClient:
     ) -> dict:
         return NotImplemented
 
-    async def post_log(self, channel_id: Union[int, str], data: dict) -> dict:
+    async def post_log(self, channel_id: int | str, data: dict) -> dict:
         return NotImplemented
 
-    async def search_closed_by(self, user_id: Union[int, str]):
+    async def search_closed_by(self, user_id: int | str):
         return NotImplemented
 
-    async def search_by_text(self, text: str, limit: Optional[int]):
+    async def search_by_text(self, text: str, limit: int | None):
         return NotImplemented
 
-    async def create_note(self, recipient: Member, message: Message, message_id: Union[int, str]):
+    async def create_note(self, recipient: Member, message: Message, message_id: int | str):
         return NotImplemented
 
     async def find_notes(self, recipient: Member):
@@ -419,10 +421,10 @@ class ApiClient:
     async def update_note_ids(self, ids: dict):
         return NotImplemented
 
-    async def delete_note(self, message_id: Union[int, str]):
+    async def delete_note(self, message_id: int | str):
         return NotImplemented
 
-    async def edit_note(self, message_id: Union[int, str], message: str):
+    async def edit_note(self, message_id: int | str, message: str):
         return NotImplemented
 
     def get_plugin_partition(self, cog):
@@ -431,7 +433,7 @@ class ApiClient:
     async def update_repository(self) -> dict:
         return NotImplemented
 
-    async def get_user_info(self) -> Optional[dict]:
+    async def get_user_info(self) -> dict | None:
         return NotImplemented
 
 
@@ -531,7 +533,7 @@ class MongoDBClient(ApiClient):
             logger.debug("Successfully connected to the database.")
         logger.line("debug")
 
-    async def get_user_logs(self, user_id: Union[str, int]) -> list:
+    async def get_user_logs(self, user_id: str | int) -> list:
         query = {"recipient.id": str(user_id), "guild_id": str(self.bot.guild_id)}
         projection = {"messages": {"$slice": 5}}
         logger.debug("Retrieving user %s logs.", user_id)
@@ -545,7 +547,7 @@ class MongoDBClient(ApiClient):
 
         return await self.logs.find(query, projection).to_list(None)
 
-    async def get_latest_user_logs(self, user_id: Union[str, int]):
+    async def get_latest_user_logs(self, user_id: str | int):
         query = {
             "recipient.id": str(user_id),
             "guild_id": str(self.bot.guild_id),
@@ -556,7 +558,7 @@ class MongoDBClient(ApiClient):
 
         return await self.logs.find_one(query, projection, limit=1, sort=[("closed_at", -1)])
 
-    async def get_responded_logs(self, user_id: Union[str, int]) -> list:
+    async def get_responded_logs(self, user_id: str | int) -> list:
         query = {
             "open": False,
             "messages": {
@@ -573,11 +575,11 @@ class MongoDBClient(ApiClient):
         query = {"open": True}
         return await self.logs.find(query).to_list(None)
 
-    async def get_log(self, channel_id: Union[str, int]) -> dict:
+    async def get_log(self, channel_id: str | int) -> dict:
         logger.debug("Retrieving channel %s logs.", channel_id)
         return await self.logs.find_one({"channel_id": str(channel_id)})
 
-    async def get_log_link(self, channel_id: Union[str, int]) -> str:
+    async def get_log_link(self, channel_id: str | int) -> str:
         doc = await self.get_log(channel_id)
         logger.debug("Retrieving log link for channel %s.", channel_id)
         prefix = self.bot.config["log_url_prefix"].strip("/")
@@ -647,7 +649,7 @@ class MongoDBClient(ApiClient):
         if unset:
             return await self.db.config.update_one({"bot_id": self.bot.user.id}, {"$unset": unset})
 
-    async def edit_message(self, message_id: Union[int, str], new_content: str) -> None:
+    async def edit_message(self, message_id: int | str, new_content: str) -> None:
         await self.logs.update_one(
             {"messages.message_id": str(message_id)},
             {"$set": {"messages.$.content": new_content, "messages.$.edited": True}},
@@ -694,12 +696,12 @@ class MongoDBClient(ApiClient):
             return_document=True,
         )
 
-    async def post_log(self, channel_id: Union[int, str], data: dict) -> dict:
+    async def post_log(self, channel_id: int | str, data: dict) -> dict:
         return await self.logs.find_one_and_update(
             {"channel_id": str(channel_id)}, {"$set": data}, return_document=True
         )
 
-    async def search_closed_by(self, user_id: Union[int, str]):
+    async def search_closed_by(self, user_id: int | str):
         return await self.logs.find(
             {
                 "guild_id": str(self.bot.guild_id),
@@ -709,7 +711,7 @@ class MongoDBClient(ApiClient):
             {"messages": {"$slice": 5}},
         ).to_list(None)
 
-    async def search_by_text(self, text: str, limit: Optional[int]):
+    async def search_by_text(self, text: str, limit: int | None):
         return await self.bot.db.logs.find(
             {
                 "guild_id": str(self.bot.guild_id),
@@ -719,7 +721,7 @@ class MongoDBClient(ApiClient):
             {"messages": {"$slice": 5}},
         ).to_list(limit)
 
-    async def create_note(self, recipient: Member, message: Message, message_id: Union[int, str]):
+    async def create_note(self, recipient: Member, message: Message, message_id: int | str):
         await self.db.notes.insert_one(
             {
                 "recipient": str(recipient.id),
@@ -743,10 +745,10 @@ class MongoDBClient(ApiClient):
         for object_id, message_id in ids.items():
             await self.db.notes.update_one({"_id": object_id}, {"$set": {"message_id": message_id}})
 
-    async def delete_note(self, message_id: Union[int, str]):
+    async def delete_note(self, message_id: int | str):
         await self.db.notes.delete_one({"message_id": str(message_id)})
 
-    async def edit_note(self, message_id: Union[int, str], message: str):
+    async def edit_note(self, message_id: int | str, message: str):
         await self.db.notes.update_one({"message_id": str(message_id)}, {"$set": {"message": message}})
 
     def get_plugin_partition(self, cog):
@@ -765,7 +767,7 @@ class MongoDBClient(ApiClient):
             },
         }
 
-    async def get_user_info(self) -> Optional[dict]:
+    async def get_user_info(self) -> dict | None:
         try:
             user = await GitHub.login(self.bot)
         except InvalidConfigError:

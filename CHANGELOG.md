@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+Current supported Python versions: 3.12+.
+(Older entries may reference earlier supported versions at the time.)
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 This project mostly adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
 however, insignificant breaking changes do not guarantee a major version bump, see the reasoning [here](https://github.com/modmail-dev/modmail/issues/319). If you're a plugin developer, note the "BREAKING" section.
@@ -796,7 +799,7 @@ Fixed discord.py issue.
 - Reworked `config.get` and `config.set`, it feeds through the converters before setting/getting.
   - To get/set the raw value, access through `config[]`.
 - The prerelease naming scheme is now `x.x.x-devN`.
-- `trigger_typing` has been moved to `core.utils.trigger_typing`, the original location is deprecated.
+- `trigger_typing` has been moved to `modmail.core.utils.trigger_typing`, the original location is deprecated.
 - Simpler status and activity logic.
 - New logging logic.
 

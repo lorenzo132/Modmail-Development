@@ -1,40 +1,43 @@
+from __future__ import annotations
+
 import asyncio
-import copy
 import base64
+import contextlib
+import copy
 import functools
 import io
+import logging
 import re
 import time
 import traceback
-import typing
 import warnings
-from datetime import timedelta, datetime, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-import isodate
-
 import discord
+import isodate
 from discord.ext import commands
-from discord.ext.commands import MissingRequiredArgument, CommandError
-from lottie.importers import importers as l_importers
+from discord.ext.commands import CommandError, MissingRequiredArgument
+from discord.ext.commands.view import StringView
 from lottie.exporters import exporters as l_exporters
+from lottie.importers import importers as l_importers
 
-from core.models import DMDisabled, DummyMessage, PermissionLevel, getLogger
-from core import checks
-from core.utils import (
-    is_image_url,
-    parse_channel_topic,
-    match_title,
-    match_user_id,
-    truncate,
-    get_top_role,
+from . import checks
+from .models import DMDisabled, DummyMessage, PermissionLevel, getLogger
+from .utils import (
+    AcceptButton,
+    ConfirmThreadCreationView,
+    DenyButton,
+    DummyParam,
     create_thread_channel,
     get_joint_id,
-    AcceptButton,
-    DenyButton,
-    ConfirmThreadCreationView,
-    DummyParam,
-    extract_forwarded_content,
+    get_top_role,
+    is_image_url,
+    match_title,
+    match_user_id,
+    normalize_alias,
+    parse_channel_topic,
+    truncate,
 )
 
 logger = getLogger(__name__)
@@ -45,10 +48,10 @@ class Thread:
 
     def __init__(
         self,
-        manager: "ThreadManager",
-        recipient: typing.Union[discord.Member, discord.User, int],
-        channel: typing.Union[discord.DMChannel, discord.TextChannel] = None,
-        other_recipients: typing.List[typing.Union[discord.Member, discord.User]] = None,
+        manager: ThreadManager,
+        recipient: discord.Member | discord.User | int,
+        channel: discord.DMChannel | discord.TextChannel = None,
+        other_recipients: list[discord.Member | discord.User] = None,
     ):
         self.manager = manager
         self.bot = manager.bot
@@ -93,7 +96,7 @@ class Thread:
         self.wait_tasks.append(task)
         try:
             await task
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Waiting for thread setup timed out.")
         finally:
             if task in self.wait_tasks:
@@ -104,15 +107,15 @@ class Thread:
         return self._id
 
     @property
-    def channel(self) -> typing.Union[discord.TextChannel, discord.DMChannel]:
+    def channel(self) -> discord.TextChannel | discord.DMChannel:
         return self._channel
 
     @property
-    def recipient(self) -> typing.Optional[typing.Union[discord.User, discord.Member]]:
+    def recipient(self) -> discord.User | discord.Member | None:
         return self._recipient
 
     @property
-    def recipients(self) -> typing.List[typing.Union[discord.User, discord.Member]]:
+    def recipients(self) -> list[discord.User | discord.Member]:
         return [self._recipient] + self._other_recipients
 
     @property
@@ -193,7 +196,7 @@ class Thread:
                 if log_entry and "key" in log_entry:
                     self.log_key = log_entry["key"]
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self.snooze_data = {
             "category_id": channel.category_id,
             "position": channel.position,
@@ -224,16 +227,12 @@ class Thread:
                     "author_name": (
                         getattr(m.embeds[0].author, "name", "").split(" (")[0]
                         if m.embeds and m.embeds[0].author and m.author == self.bot.user
-                        else getattr(m.author, "name", None)
-                        if m.author != self.bot.user
-                        else None
+                        else getattr(m.author, "name", None) if m.author != self.bot.user else None
                     ),
                     "author_avatar": (
                         getattr(m.embeds[0].author, "icon_url", None)
                         if m.embeds and m.embeds[0].author and m.author == self.bot.user
-                        else m.author.display_avatar.url
-                        if m.author != self.bot.user
-                        else None
+                        else m.author.display_avatar.url if m.author != self.bot.user else None
                     ),
                 }
                 async for m in channel.history(limit=None, oldest_first=True)
@@ -255,8 +254,6 @@ class Thread:
                 {"channel_id": str(self.channel.id)},
                 {"$set": {"snoozed": True, "snooze_data": self.snooze_data}},
             )
-        import logging
-
         logging.info(f"[SNOOZE] DB update result: {result.modified_count}")
 
         behavior = behavior_pre
@@ -345,8 +342,6 @@ class Thread:
         self._unsnoozing = True
 
         if not self.snooze_data or not isinstance(self.snooze_data, dict):
-            import logging
-
             logging.warning(
                 f"[UNSNOOZE] Tried to restore thread {self.id} but snooze_data is None or not a dict."
             )
@@ -371,7 +366,7 @@ class Thread:
             orig_category = guild.get_channel(int(main_cat_id)) if main_cat_id else None
 
         # Default: assume we'll need to recreate
-        channel: typing.Optional[discord.TextChannel] = None
+        channel: discord.TextChannel | None = None
 
         # If move-behavior and channel still exists, move it back and restore overwrites
         if behavior == "move" and isinstance(self.channel, discord.TextChannel):
@@ -498,7 +493,7 @@ class Thread:
                         user = SimpleNamespace(
                             id=self.id,
                             mention=f"<@{self.id}>",
-                            created_at=datetime.now(timezone.utc),
+                            created_at=datetime.now(UTC),
                         )
                 try:
                     info_embed = self._format_info_embed(user, log_url, log_count, self.bot.main_color)
@@ -720,8 +715,6 @@ class Thread:
                         "$unset": {"snoozed": "", "snooze_data": ""},
                     },
                 )
-        import logging
-
         logging.info(f"[UNSNOOZE] DB update result: {result.modified_count}")
         # Notify in the configured channel
         notify_channel = self.bot.config.get("unsnooze_notify_channel") or "thread"
@@ -757,7 +750,7 @@ class Thread:
         return True
 
     @classmethod
-    async def from_channel(cls, manager: "ThreadManager", channel: discord.TextChannel) -> "Thread":
+    async def from_channel(cls, manager: ThreadManager, channel: discord.TextChannel) -> Thread:
         # there is a chance it grabs from another recipient's main thread
         _, recipient_id, other_ids = parse_channel_topic(channel.topic)
 
@@ -781,9 +774,13 @@ class Thread:
     async def get_genesis_message(self) -> discord.Message:
         if self._genesis_message is None:
             async for m in self.channel.history(limit=5, oldest_first=True):
-                if m.author == self.bot.user:
-                    if m.embeds and m.embeds[0].fields and m.embeds[0].fields[0].name == "Roles":
-                        self._genesis_message = m
+                if (
+                    m.author == self.bot.user
+                    and m.embeds
+                    and m.embeds[0].fields
+                    and m.embeds[0].fields[0].name == "Roles"
+                ):
+                    self._genesis_message = m
 
         return self._genesis_message
 
@@ -834,10 +831,7 @@ class Thread:
 
         self.ready = True
 
-        if creator is not None and creator != recipient:
-            mention = None
-        else:
-            mention = self.bot.config["mention"]
+        mention = None if creator is not None and creator != recipient else self.bot.config["mention"]
 
         async def send_genesis_message():
             info_embed = self._format_info_embed(recipient, log_url, log_count, self.bot.main_color)
@@ -1040,7 +1034,7 @@ class Thread:
     async def close(
         self,
         *,
-        closer: typing.Union[discord.Member, discord.User],
+        closer: discord.Member | discord.User,
         after: int = 0,
         silent: bool = False,
         delete_channel: bool = True,
@@ -1080,11 +1074,9 @@ class Thread:
     async def _close(self, closer, silent=False, delete_channel=True, message=None, scheduled=False):
         # Proactively disable any DM thread-creation menu so users can't keep interacting
         # with the menu after the thread is closed.
-        try:
+        # Non-fatal; continue closing even if we can't edit the DM menu
+        with contextlib.suppress(Exception):
             await self._disable_dm_creation_menu()
-        except Exception:
-            # Non-fatal; continue closing even if we can't edit the DM menu
-            pass
         if self.channel:
             self.manager.closing.add(self.channel.id)
         try:
@@ -1138,10 +1130,7 @@ class Thread:
             else:
                 sneak_peak = "No content"
 
-            if self.channel.nsfw:
-                _nsfw = "NSFW-"
-            else:
-                _nsfw = ""
+            _nsfw = "NSFW-" if self.channel.nsfw else ""
 
             desc = f"[`{_nsfw}{log_data['key']}`]({log_url}): "
             desc += truncate(sneak_peak, max=75 - 13)
@@ -1151,15 +1140,9 @@ class Thread:
 
         embed = discord.Embed(description=desc, color=self.bot.error_color)
 
-        if self.recipient is not None:
-            user = f"{self.recipient} (`{self.id}`)"
-        else:
-            user = f"`{self.id}`"
+        user = f"{self.recipient} (`{self.id}`)" if self.recipient is not None else f"`{self.id}`"
 
-        if self.id == closer.id:
-            _closer = "the Recipient"
-        else:
-            _closer = f"{closer} ({closer.id})"
+        _closer = "the Recipient" if self.id == closer.id else f"{closer} ({closer.id})"
 
         embed.title = user
 
@@ -1239,7 +1222,7 @@ class Thread:
         if not isinstance(user, (discord.User, discord.Member)):
             return
         # Ensure we have a DM channel
-        dm: typing.Optional[discord.DMChannel] = getattr(user, "dm_channel", None)
+        dm: discord.DMChannel | None = getattr(user, "dm_channel", None)
         if dm is None:
             try:
                 dm = await user.create_dm()
@@ -1322,11 +1305,11 @@ class Thread:
 
     async def find_linked_messages(
         self,
-        message_id: typing.Optional[int] = None,
+        message_id: int | None = None,
         either_direction: bool = False,
         message1: discord.Message = None,
         note: bool = True,
-    ) -> typing.Tuple[discord.Message, typing.List[typing.Optional[discord.Message]]]:
+    ) -> tuple[discord.Message, list[discord.Message | None]]:
         if message1 is not None:
             if note:
                 # For notes, don't require author.url; rely on footer/author.name markers
@@ -1350,24 +1333,23 @@ class Thread:
         elif message_id is not None:
             try:
                 message1 = await self.channel.fetch_message(message_id)
-            except discord.NotFound:
+            except discord.NotFound as exc:
                 logger.warning(f"Message ID {message_id} not found in channel history.")
-                raise ValueError("Thread message not found.")
+                raise ValueError("Thread message not found.") from exc
 
-            if note:
+            if note and message1.embeds and message1.author == self.bot.user:
                 # Try to treat as note/persistent note first
-                if message1.embeds and message1.author == self.bot.user:
-                    footer_text = (message1.embeds[0].footer and message1.embeds[0].footer.text) or ""
-                    author_name = getattr(message1.embeds[0].author, "name", "") or ""
-                    is_note = (
-                        "internal note" in footer_text.lower()
-                        or "persistent internal note" in footer_text.lower()
-                        or author_name.startswith("📝 Note")
-                        or author_name.startswith("📝 Persistent Note")
-                    )
-                    if is_note:
-                        # Notes have no linked DM counterpart; keep None sentinel
-                        return message1, None
+                footer_text = (message1.embeds[0].footer and message1.embeds[0].footer.text) or ""
+                author_name = getattr(message1.embeds[0].author, "name", "") or ""
+                is_note = (
+                    "internal note" in footer_text.lower()
+                    or "persistent internal note" in footer_text.lower()
+                    or author_name.startswith("📝 Note")
+                    or author_name.startswith("📝 Persistent Note")
+                )
+                if is_note:
+                    # Notes have no linked DM counterpart; keep None sentinel
+                    return message1, None
                 # else: fall through to relay checks below
 
             # Non-note path (regular relayed messages): require author.url and colors
@@ -1415,15 +1397,14 @@ class Thread:
 
         try:
             joint_id = int(message1.embeds[0].author.url.split("#")[-1])
-        except ValueError:
-            raise ValueError("Malformed thread message.")
+        except ValueError as exc:
+            raise ValueError("Malformed thread message.") from exc
 
         messages = [message1]
         for user in self.recipients:
             async for msg in user.history():
-                if either_direction:
-                    if msg.id == joint_id:
-                        return message1, msg
+                if either_direction and msg.id == joint_id:
+                    return message1, msg
 
                 if not (msg.embeds and msg.embeds[0].author.url):
                     continue
@@ -1439,7 +1420,7 @@ class Thread:
 
         raise ValueError("DM message not found.")
 
-    async def edit_message(self, message_id: typing.Optional[int], message: str) -> None:
+    async def edit_message(self, message_id: int | None, message: str) -> None:
         try:
             message1, *message2 = await self.find_linked_messages(message_id)
         except ValueError:
@@ -1464,9 +1445,7 @@ class Thread:
 
         await asyncio.gather(*tasks)
 
-    async def delete_message(
-        self, message: typing.Union[int, discord.Message] = None, note: bool = True
-    ) -> None:
+    async def delete_message(self, message: int | discord.Message = None, note: bool = True) -> None:
         if isinstance(message, discord.Message):
             message1, *message2 = await self.find_linked_messages(message1=message, note=note)
         else:
@@ -1487,7 +1466,7 @@ class Thread:
 
     async def find_linked_message_from_dm(
         self, message, either_direction=False, get_thread_channel=False
-    ) -> typing.List[discord.Message]:
+    ) -> list[discord.Message]:
         joint_id = None
         if either_direction:
             joint_id = get_joint_id(message)
@@ -1531,10 +1510,9 @@ class Thread:
             if user.dm_channel == message.channel:
                 continue
             async for other_msg in user.history():
-                if either_direction:
-                    if other_msg.id == joint_id:
-                        linked_messages.append(other_msg)
-                        break
+                if either_direction and other_msg.id == joint_id:
+                    linked_messages.append(other_msg)
+                    break
 
                 if not other_msg.embeds:
                     continue
@@ -1587,10 +1565,10 @@ class Thread:
     async def reply(
         self,
         message: discord.Message,
-        content: typing.Optional[str] = None,
+        content: str | None = None,
         anonymous: bool = False,
         plain: bool = False,
-    ) -> typing.Tuple[typing.List[discord.Message], discord.Message]:
+    ) -> tuple[list[discord.Message], discord.Message]:
         """Send a moderator reply to the thread.
 
         Parameters
@@ -1744,9 +1722,7 @@ class Thread:
     async def send(
         self,
         message: discord.Message,
-        destination: typing.Union[
-            discord.TextChannel, discord.DMChannel, discord.User, discord.Member
-        ] = None,
+        destination: discord.TextChannel | discord.DMChannel | discord.User | discord.Member = None,
         from_mod: bool = False,
         note: bool = False,
         anonymous: bool = False,
@@ -1754,7 +1730,7 @@ class Thread:
         persistent_note: bool = False,
         thread_creation: bool = False,
         *,
-        content_override: typing.Optional[str] = None,
+        content_override: str | None = None,
     ) -> None:
         """Low-level send routine used by reply/note logic.
 
@@ -1784,10 +1760,7 @@ class Thread:
             )
 
             # Set author with note icon and username
-            if persistent_note:
-                note_type = "Persistent Note"
-            else:
-                note_type = "Note"
+            note_type = "Persistent Note" if persistent_note else "Note"
 
             embed.set_author(
                 name=f"📝 {note_type} ({message.author.name})", icon_url=message.author.display_avatar.url
@@ -1798,10 +1771,7 @@ class Thread:
                 embed.timestamp = message.created_at
 
             # Add a subtle footer to distinguish from replies
-            if persistent_note:
-                embed.set_footer(text="Persistent Internal Note")
-            else:
-                embed.set_footer(text="Internal Note")
+            embed.set_footer(text="Persistent Internal Note" if persistent_note else "Internal Note")
 
             return await destination.send(embed=embed)
 
@@ -1837,10 +1807,7 @@ class Thread:
 
         author = message.author
         member = self.bot.guild.get_member(author.id)
-        if member:
-            avatar_url = member.display_avatar.url
-        else:
-            avatar_url = author.display_avatar.url
+        avatar_url = member.display_avatar.url if member else author.display_avatar.url
 
         # Handle forwarded messages first
         forwarded_jump_url = None
@@ -1882,10 +1849,7 @@ class Thread:
                 content = (content_override if content_override is not None else message.content) or ""
 
         # Only set description if there's actual content to show
-        if content:
-            embed = discord.Embed(description=content)
-        else:
-            embed = discord.Embed()
+        embed = discord.Embed(description=content) if content else discord.Embed()
         if self.bot.config["show_timestamp"]:
             embed.timestamp = message.created_at
 
@@ -1930,10 +1894,7 @@ class Thread:
                 )
         else:
             # Notes use system message style with note icon
-            if persistent_note:
-                note_type = "Persistent Note"
-            else:
-                note_type = "Note"
+            note_type = "Persistent Note" if persistent_note else "Note"
 
             embed.set_author(
                 name=f"📝 {note_type} ({str(author)})",
@@ -2216,7 +2177,7 @@ class Thread:
 
     async def get_notifications(self) -> str:
         key = str(self.id)
-        mentions: typing.List[str] = []
+        mentions: list[str] = []
         subs = self.bot.config["subscriptions"].get(key, [])
         mentions.extend(subs)
         one_time = self.bot.config["notification_squad"].get(key, [])
@@ -2262,7 +2223,7 @@ class Thread:
 
         await genesis_message.edit(embed=embed)
 
-    async def add_users(self, users: typing.List[typing.Union[discord.Member, discord.User]]) -> None:
+    async def add_users(self, users: list[discord.Member | discord.User]) -> None:
         topic = ""
         title, _, _ = parse_channel_topic(self.channel.topic)
         if title is not None:
@@ -2280,7 +2241,7 @@ class Thread:
         await self.channel.edit(topic=topic)
         await self._update_users_genesis()
 
-    async def remove_users(self, users: typing.List[typing.Union[discord.Member, discord.User]]) -> None:
+    async def remove_users(self, users: list[discord.Member | discord.User]) -> None:
         topic = ""
         title, user_id, _ = parse_channel_topic(self.channel.topic)
         if title is not None:
@@ -2376,10 +2337,10 @@ class ThreadManager:
     async def find(
         self,
         *,
-        recipient: typing.Union[discord.Member, discord.User] = None,
+        recipient: discord.Member | discord.User = None,
         channel: discord.TextChannel = None,
         recipient_id: int = None,
-    ) -> typing.Optional[Thread]:
+    ) -> Thread | None:
         """Finds a thread from cache or from discord channel topics."""
         if recipient is None and channel is not None and isinstance(channel, discord.TextChannel):
             if channel.id in self.closing:
@@ -2508,10 +2469,10 @@ class ThreadManager:
 
     async def create(
         self,
-        recipient: typing.Union[discord.Member, discord.User],
+        recipient: discord.Member | discord.User,
         *,
         message: discord.Message = None,
-        creator: typing.Union[discord.Member, discord.User] = None,
+        creator: discord.Member | discord.User = None,
         category: discord.CategoryChannel = None,
         manual_trigger: bool = True,
     ) -> Thread:
@@ -2525,24 +2486,28 @@ class ThreadManager:
             min_chars = int(min_chars)
         except ValueError:
             min_chars = 0
-        if min_chars > 0 and message is not None and message.content is not None:
-            if len(message.content.strip()) < min_chars:
-                embed = discord.Embed(
-                    title=self.bot.config["thread_min_characters_title"],
-                    description=self.bot.config["thread_min_characters_response"].replace(
-                        "{min_characters}", str(min_chars)
-                    ),
-                    color=self.bot.error_color,
+        if (
+            min_chars > 0
+            and message is not None
+            and message.content is not None
+            and len(message.content.strip()) < min_chars
+        ):
+            embed = discord.Embed(
+                title=self.bot.config["thread_min_characters_title"],
+                description=self.bot.config["thread_min_characters_response"].replace(
+                    "{min_characters}", str(min_chars)
+                ),
+                color=self.bot.error_color,
+            )
+            embed.set_footer(
+                text=self.bot.config["thread_min_characters_footer"].replace(
+                    "{min_characters}", str(min_chars)
                 )
-                embed.set_footer(
-                    text=self.bot.config["thread_min_characters_footer"].replace(
-                        "{min_characters}", str(min_chars)
-                    )
-                )
-                await message.channel.send(embed=embed)
-                thread = Thread(self, recipient)
-                thread.cancelled = True
-                return thread
+            )
+            await message.channel.send(embed=embed)
+            thread = Thread(self, recipient)
+            thread.cancelled = True
+            return thread
 
         # checks for existing thread in cache
         thread = self.cache.get(recipient.id)
@@ -2585,10 +2550,7 @@ class ThreadManager:
             and self.bot.config["confirm_thread_creation"]
             and not (adv_menu_enabled and user_initiated_dm)
         ):
-            if not manual_trigger:
-                destination = recipient
-            else:
-                destination = message.channel
+            destination = recipient if not manual_trigger else message.channel
             view = ConfirmThreadCreationView()
             view.add_item(
                 AcceptButton(
@@ -2660,7 +2622,6 @@ class ThreadManager:
                 timeout = 20
 
             options = self.bot.config.get("thread_creation_menu_options") or {}
-            submenus = self.bot.config.get("thread_creation_menu_submenus") or {}
 
             # Minimal inline view implementation (avoid importing plugin code)
 
@@ -2824,7 +2785,7 @@ class ThreadManager:
                             if self.outer_thread.cancelled:
                                 # Clear pending/menu state and cache
                                 try:
-                                    setattr(self.outer_thread, "_pending_menu", False)
+                                    self.outer_thread._pending_menu = False
                                     self.outer_thread.manager.cache.pop(self.outer_thread.id, None)
                                 except Exception:
                                     logger.debug(
@@ -2849,7 +2810,7 @@ class ThreadManager:
                         # Edge-case: unsnoozed restore might have re-created the channel but genesis send failed; ensure ready channel exists
                         if not self.outer_thread.channel:
                             logger.warning("Thread has no channel after unsnooze+selection; abort relay.")
-                            setattr(self.outer_thread, "_pending_menu", False)
+                            self.outer_thread._pending_menu = False
                             return
                         # Forward the user's initial DM to the thread channel
                         try:
@@ -2882,7 +2843,7 @@ class ThreadManager:
                                 False,
                             )
                         # Clear pending flag
-                        setattr(self.outer_thread, "_pending_menu", False)
+                        self.outer_thread._pending_menu = False
                     except Exception:
                         logger.warning(
                             "Unhandled failure after menu selection while waiting for channel readiness.",
@@ -2892,9 +2853,6 @@ class ThreadManager:
                     if selected and selected.get("type") == "command":
                         alias = selected.get("callback")
                         if alias:
-                            from discord.ext.commands.view import StringView
-                            from core.utils import normalize_alias
-
                             ctxs = []
                             for al in normalize_alias(alias):
                                 view_ = StringView(self.outer_thread.bot.prefix + al)
@@ -2909,7 +2867,7 @@ class ThreadManager:
                                 except Exception:
                                     synthetic.author = self.outer_thread.bot.user
                                 # Mark this message as menu-invoked for downstream formatting
-                                setattr(synthetic, "_menu_invoked", True)
+                                synthetic._menu_invoked = True
                                 ctx_ = commands.Context(
                                     prefix=self.outer_thread.bot.prefix,
                                     view=view_,
@@ -2924,7 +2882,7 @@ class ThreadManager:
                                 ctx_.invoked_with = view_.get_word().lower()
                                 ctx_.command = self.outer_thread.bot.all_commands.get(ctx_.invoked_with)
                                 # Mark context so downstream send/reply logic can treat as system/bot
-                                setattr(ctx_, "_menu_invoked", True)
+                                ctx_._menu_invoked = True
                                 ctxs.append(ctx_)
                             for ctx_ in ctxs:
                                 if ctx_.command:
@@ -2977,7 +2935,7 @@ class ThreadManager:
                                 exc_info=True,
                             )
                         # Clear pending menu flag so a new message can recreate a fresh thread
-                        setattr(self.outer_thread, "_pending_menu", False)
+                        self.outer_thread._pending_menu = False
                         self.outer_thread.cancelled = True
                     else:
                         try:
@@ -3005,7 +2963,7 @@ class ThreadManager:
                                 exc_info=True,
                             )
                         # Allow subsequent messages to trigger a new menu/thread by clearing state
-                        setattr(self.outer_thread, "_pending_menu", False)
+                        self.outer_thread._pending_menu = False
                         try:
                             self.outer_thread.manager.cache.pop(self.outer_thread.id, None)
                         except Exception:
@@ -3223,9 +3181,6 @@ class ThreadManager:
                     if selected and selected.get("type") == "command":
                         alias = selected.get("callback")
                         if alias:
-                            from discord.ext.commands.view import StringView
-                            from core.utils import normalize_alias
-
                             ctxs = []
                             for al in normalize_alias(alias):
                                 view_ = StringView(self.outer_thread.bot.prefix + al)
@@ -3236,7 +3191,7 @@ class ThreadManager:
                                     )
                                 except Exception:
                                     synthetic.author = self.outer_thread.bot.user
-                                setattr(synthetic, "_menu_invoked", True)
+                                synthetic._menu_invoked = True
                                 ctx_ = commands.Context(
                                     prefix=self.outer_thread.bot.prefix,
                                     view=view_,
@@ -3250,7 +3205,7 @@ class ThreadManager:
                                 )
                                 ctx_.invoked_with = view_.get_word().lower()
                                 ctx_.command = self.outer_thread.bot.all_commands.get(ctx_.invoked_with)
-                                setattr(ctx_, "_menu_invoked", True)
+                                ctx_._menu_invoked = True
                                 ctxs.append(ctx_)
                             for ctx_ in ctxs:
                                 if ctx_.command:

@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm as base
+FROM python:3.12-slim-bookworm as base
 
 RUN apt-get update &&  \
     apt-get install --no-install-recommends -y \
@@ -35,4 +35,4 @@ ENV PYTHONUNBUFFERED=1 \
     PATH=/opt/modmail/.venv/bin:$PATH \
     USING_DOCKER=yes
 
-CMD ["python", "bot.py"]
+CMD ["python", "start.py"]

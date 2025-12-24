@@ -1,6 +1,10 @@
 version: "3.7"
 services:
   bot:
+    # Uses the published image by default.
+    # For local development using this repository's Dockerfile, switch to:
+    #   build: .
+    #   image: modmail:local
     image: ghcr.io/modmail-dev/modmail:master
     restart: always
     env_file:

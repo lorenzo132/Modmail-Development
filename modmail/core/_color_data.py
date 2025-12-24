@@ -3,6 +3,8 @@ Retrieved from matplotlib colors library.
 Slightly modified to conform with usage.
 """
 
+from __future__ import annotations
+
 BASE_COLORS = {
     "b": "0000ff",
     "g": "007f00",

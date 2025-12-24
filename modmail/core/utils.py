@@ -1,18 +1,20 @@
+from __future__ import annotations
+
 import base64
-import functools
 import contextlib
+import functools
 import re
-import typing
-from datetime import datetime, timezone
+from collections.abc import Callable, Iterable, Sequence
+from datetime import UTC, datetime
 from difflib import get_close_matches
 from itertools import takewhile, zip_longest
+from typing import Any
 from urllib import parse
 
 import discord
 from discord.ext import commands
 
-from core.models import getLogger
-
+from .models import getLogger
 
 __all__ = [
     "strtobool",
@@ -48,29 +50,27 @@ __all__ = [
     "extract_forwarded_content",
 ]
 
-
 logger = getLogger(__name__)
 
 
-def strtobool(val):
+def strtobool(val: str | bool | int) -> int:
+    """Convert a string representation of truth to int (0 or 1)."""
     if isinstance(val, bool):
-        return val
-    val = str(val).lower()
-    if val in ("y", "yes", "on", "1", "true", "t", "enable"):
+        return int(val)
+    val_str = str(val).lower()
+    if val_str in ("y", "yes", "on", "1", "true", "t", "enable"):
         return 1
-    if val in ("n", "no", "off", "0", "false", "f", "disable"):
+    if val_str in ("n", "no", "off", "0", "false", "f", "disable"):
         return 0
     raise ValueError(f"invalid truth value {val}")
 
 
 class User(commands.MemberConverter):
-    """
-    A custom discord.py `Converter` that
-    supports `Member`, `User`, and string ID's.
-    """
+    """A custom discord.py Converter supporting Member, User, and string IDs."""
 
-    # noinspection PyCallByClass,PyTypeChecker
-    async def convert(self, ctx, argument):
+    async def convert(
+        self, ctx: commands.Context, argument: str
+    ) -> discord.Member | discord.User | discord.Object:
         try:
             return await commands.MemberConverter().convert(ctx, argument)
         except commands.BadArgument:
@@ -81,21 +81,20 @@ class User(commands.MemberConverter):
             pass
         match = self._get_id_match(argument)
         if match is None:
-            raise commands.BadArgument('User "{}" not found'.format(argument))
+            raise commands.BadArgument(f'User "{argument}" not found')
         return discord.Object(int(match.group(1)))
 
 
 def truncate(text: str, max: int = 50) -> str:  # pylint: disable=redefined-builtin
     """
-    Reduces the string to `max` length, by trimming the message into "...".
+    Reduce string to max length by trimming to "...".
 
     Parameters
     ----------
     text : str
         The text to trim.
     max : int, optional
-        The max length of the text.
-        Defaults to 50.
+        The max length of the text. Defaults to 50.
 
     Returns
     -------
@@ -106,13 +105,13 @@ def truncate(text: str, max: int = 50) -> str:  # pylint: disable=redefined-buil
     return text[: max - 3].strip() + "..." if len(text) > max else text
 
 
-def format_preview(messages: typing.List[typing.Dict[str, typing.Any]]):
+def format_preview(messages: list[dict[str, Any]]) -> str:
     """
-    Used to format previews.
+    Format message previews.
 
     Parameters
     ----------
-    messages : List[Dict[str, Any]]
+    messages : list[dict[str, Any]]
         A list of messages.
 
     Returns
@@ -131,14 +130,14 @@ def format_preview(messages: typing.List[typing.Dict[str, typing.Any]]):
         name = author["name"]
         discriminator = str(author["discriminator"])
         if discriminator != "0":
-            name += "#" + discriminator
+            name += f"#{discriminator}"
         prefix = "[M]" if author["mod"] else "[R]"
         out += truncate(f"`{prefix} {name}:` {content}", max=75) + "\n"
 
     return out or "No Messages"
 
 
-def is_image_url(url: str, **kwargs) -> str:
+def is_image_url(url: str, **kwargs: object) -> str:
     """
     Check if the URL is pointing to an image.
 
@@ -149,12 +148,12 @@ def is_image_url(url: str, **kwargs) -> str:
 
     Returns
     -------
-    bool
-        Whether the URL is a valid image URL.
+    str
+        The converted image URL if valid, empty string otherwise.
     """
     try:
         result = parse.urlparse(url)
-        if result.netloc == "gyazo.com" and result.scheme in ["http", "https"]:
+        if result.netloc == "gyazo.com" and result.scheme in ("http", "https"):
             # gyazo support
             url = re.sub(
                 r"(https?://)((?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*(),]|%[0-9a-fA-F][0-9a-fA-F])+)",
@@ -167,7 +166,7 @@ def is_image_url(url: str, **kwargs) -> str:
     return parse_image_url(url, **kwargs)
 
 
-def parse_image_url(url: str, *, convert_size=True) -> str:
+def parse_image_url(url: str, *, convert_size: bool = True) -> str:
     """
     Convert the image URL into a sized Discord avatar.
 
@@ -181,19 +180,24 @@ def parse_image_url(url: str, *, convert_size=True) -> str:
     str
         The converted URL, or '' if the URL isn't in the proper format.
     """
-    types = [".png", ".jpg", ".gif", ".jpeg", ".webp"]
-    url = parse.urlsplit(url)
+    types = (".png", ".jpg", ".gif", ".jpeg", ".webp")
+    url_parts = parse.urlsplit(url)
 
-    if any(url.path.lower().endswith(i) for i in types):
+    if any(url_parts.path.lower().endswith(ext) for ext in types):
         if convert_size:
-            return parse.urlunsplit((*url[:3], "size=128", url[-1]))
+            return parse.urlunsplit((*url_parts[:3], "size=128", url_parts[-1]))
         else:
-            return parse.urlunsplit(url)
+            return parse.urlunsplit(url_parts)
     return ""
 
 
-def human_join(seq: typing.Sequence[str], delim: str = ", ", final: str = "or") -> str:
-    """https://github.com/Rapptz/RoboDanny/blob/bf7d4226350dff26df4981dd53134eeb2aceeb87/cogs/utils/formats.py#L21-L32"""
+def human_join(seq: Sequence[str], delim: str = ", ", final: str = "or") -> str:
+    """
+    Join items with comma separator and final separator.
+
+    Reference:
+    https://github.com/Rapptz/RoboDanny/blob/bf7d4226350dff26df4981dd53134eeb2aceeb87/cogs/utils/formats.py#L21-L32
+    """
     size = len(seq)
     if size == 0:
         return ""
@@ -207,13 +211,13 @@ def human_join(seq: typing.Sequence[str], delim: str = ", ", final: str = "or") 
     return delim.join(seq[:-1]) + f" {final} {seq[-1]}"
 
 
-def days(day: typing.Union[str, int]) -> str:
+def days(day: str | int) -> str:
     """
     Humanize the number of days.
 
     Parameters
     ----------
-    day: Union[int, str]
+    day: str | int
         The number of days passed.
 
     Returns
@@ -221,15 +225,15 @@ def days(day: typing.Union[str, int]) -> str:
     str
         A formatted string of the number of days passed.
     """
-    day = int(day)
-    if day == 0:
+    day_int = int(day)
+    if day_int == 0:
         return "**today**"
-    return f"{day} day ago" if day == 1 else f"{day} days ago"
+    return f"{day_int} day ago" if day_int == 1 else f"{day_int} days ago"
 
 
 def cleanup_code(content: str) -> str:
     """
-    Automatically removes code blocks from the code.
+    Automatically remove code blocks from the code.
 
     Parameters
     ----------
@@ -260,10 +264,9 @@ UID_REGEX = re.compile(r"\bUser ID:\s*(\d{17,21})\b", flags=re.IGNORECASE)
 
 def parse_channel_topic(
     text: str,
-) -> typing.Tuple[typing.Optional[str], int, typing.List[int]]:
+) -> tuple[str | None, int, list[int]]:
     """
-    A helper to parse channel topics and respectivefully returns all the required values
-    at once.
+    Parse channel topics to extract title, user ID, and other recipient IDs.
 
     Parameters
     ----------
@@ -272,14 +275,11 @@ def parse_channel_topic(
 
     Returns
     -------
-    Tuple[Optional[str], int, List[int]]
+    tuple[str | None, int, list[int]]
         A tuple of title, user ID, and other recipients IDs.
     """
     title, user_id, other_ids = None, -1, []
-    if isinstance(text, str):
-        match = TOPIC_REGEX.search(text)
-    else:
-        match = None
+    match = TOPIC_REGEX.search(text) if isinstance(text, str) else None
 
     if match is not None:
         groupdict = match.groupdict()
@@ -296,26 +296,14 @@ def parse_channel_topic(
     return title, user_id, other_ids
 
 
-def match_title(text: str) -> str:
-    """
-    Matches a title in the format of "Title: XXXX"
-
-    Parameters
-    ----------
-    text : str
-        The text of the user ID.
-
-    Returns
-    -------
-    Optional[str]
-        The title if found.
-    """
+def match_title(text: str) -> str | None:
+    """Match a title in the format of "Title: XXXX"."""
     return parse_channel_topic(text)[0]
 
 
 def match_user_id(text: str, any_string: bool = False) -> int:
     """
-    Matches a user ID in the format of "User ID: 12345".
+    Match a user ID in the format of "User ID: 12345".
 
     Parameters
     ----------
@@ -341,24 +329,15 @@ def match_user_id(text: str, any_string: bool = False) -> int:
     return user_id
 
 
-def match_other_recipients(text: str) -> typing.List[int]:
-    """
-    Matches a title in the format of "Other Recipients: XXXX,XXXX"
-
-    Parameters
-    ----------
-    text : str
-        The text of the user ID.
-
-    Returns
-    -------
-    List[int]
-        The list of other recipients IDs.
-    """
+def match_other_recipients(text: str) -> list[int]:
+    """Match other recipients in the format of "Other Recipients: XXXX,XXXX"."""
     return parse_channel_topic(text)[2]
 
 
-def create_not_found_embed(word, possibilities, name, n=2, cutoff=0.6) -> discord.Embed:
+def create_not_found_embed(
+    word: str, possibilities: Iterable[str], name: str, n: int = 2, cutoff: float = 0.6
+) -> discord.Embed:
+    """Create a 'not found' embed with close match suggestions."""
     # Single reference of Color.red()
     embed = discord.Embed(
         color=discord.Color.red(),
@@ -370,11 +349,13 @@ def create_not_found_embed(word, possibilities, name, n=2, cutoff=0.6) -> discor
     return embed
 
 
-def parse_alias(alias, *, split=True):
-    def encode_alias(m):
+def parse_alias(alias: str, *, split: bool = True) -> list[str]:
+    """Parse alias string into individual commands."""
+
+    def encode_alias(m: re.Match) -> str:
         return "\x1aU" + base64.b64encode(m.group(1).encode()).decode() + "\x1aU"
 
-    def decode_alias(m):
+    def decode_alias(m: re.Match) -> str:
         return base64.b64decode(m.group(1).encode()).decode()
 
     alias = re.sub(
@@ -388,10 +369,7 @@ def parse_alias(alias, *, split=True):
     if not alias:
         return aliases
 
-    if split:
-        iterate = re.split(r"\s*&&\s*", alias)
-    else:
-        iterate = [alias]
+    iterate = re.split(r"\s*&&\s*", alias) if split else [alias]
 
     for a in iterate:
         a = re.sub(r"\x1AU(.+?)\x1AU", decode_alias, a)
@@ -402,7 +380,8 @@ def parse_alias(alias, *, split=True):
     return aliases
 
 
-def normalize_alias(alias, message=""):
+def normalize_alias(alias: str, message: str = "") -> list[str]:
+    """Normalize alias with message content."""
     aliases = parse_alias(alias)
     contents = parse_alias(message, split=False)
 
@@ -419,7 +398,8 @@ def normalize_alias(alias, message=""):
     return final_aliases
 
 
-def format_description(i, names):
+def format_description(i: int, names: Iterable[str | None]) -> str:
+    """Format description with indexed names."""
     return "\n".join(
         ": ".join((str(a + i * 15), b))
         for a, b in enumerate(takewhile(lambda x: x is not None, names), start=1)
@@ -433,12 +413,12 @@ class _SafeTyping:
     when typing is disabled or experiencing outages.
     """
 
-    def __init__(self, target):
+    def __init__(self, target: discord.abc.Messageable) -> None:
         # target can be a Context or any Messageable (channel/DM/user)
         self._target = target
-        self._cm = None
+        self._cm: Any = None
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> None:
         try:
             self._cm = self._target.typing()
             return await self._cm.__aenter__()
@@ -446,19 +426,24 @@ class _SafeTyping:
             # typing is best-effort; ignore any failure
             self._cm = None
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: object
+    ) -> None:
         if self._cm is not None:
             with contextlib.suppress(Exception):
                 return await self._cm.__aexit__(exc_type, exc, tb)
 
 
-def safe_typing(target):
+def safe_typing(target: discord.abc.Messageable) -> _SafeTyping:
+    """Create a safe typing context manager."""
     return _SafeTyping(target)
 
 
-def trigger_typing(func):
+def trigger_typing(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Decorator that keeps typing active for the duration of the command."""
+
     @functools.wraps(func)
-    async def wrapper(self, ctx: commands.Context, *args, **kwargs):
+    async def wrapper(self: object, ctx: commands.Context, *args: object, **kwargs: object) -> Any:
         # Keep typing active for the duration of the command; suppress failures
         async with safe_typing(ctx):
             return await func(self, ctx, *args, **kwargs)
@@ -466,27 +451,40 @@ def trigger_typing(func):
     return wrapper
 
 
-def escape_code_block(text):
+def escape_code_block(text: str) -> str:
+    """Escape code blocks in text."""
     return re.sub(r"```", "`\u200b``", text)
 
 
-def tryint(x):
+def tryint(x: Any) -> int | Any:
+    """Try to convert to int, return original value on failure."""
     try:
         return int(x)
     except (ValueError, TypeError):
         return x
 
 
-def get_top_role(member: discord.Member, hoisted=True):
+def get_top_role(member: discord.Member, hoisted: bool = True) -> discord.Role | None:
+    """Get the top role of a member, optionally filtered by hoisted status."""
     roles = sorted(member.roles, key=lambda r: r.position, reverse=True)
     for role in roles:
         if not hoisted:
             return role
         if role.hoist:
             return role
+    return None
 
 
-async def create_thread_channel(bot, recipient, category, overwrites, *, name=None, errors_raised=None):
+async def create_thread_channel(
+    bot: object,
+    recipient: discord.User,
+    category: discord.CategoryChannel,
+    overwrites: dict[discord.abc.PermissionTarget, discord.PermissionOverwrite],
+    *,
+    name: str | None = None,
+    errors_raised: list[tuple[str, tuple[discord.CategoryChannel, str]]] | None = None,
+) -> discord.TextChannel:
+    """Create a thread channel with fallback handling."""
     name = name or bot.format_channel_name(recipient)
     errors_raised = errors_raised or []
 
@@ -538,17 +536,19 @@ async def create_thread_channel(bot, recipient, category, overwrites, *, name=No
     return channel
 
 
-def get_joint_id(message: discord.Message) -> typing.Optional[int]:
+def get_joint_id(message: discord.Message) -> int | None:
     """
-    Get the joint ID from `discord.Embed().author.url`.
+    Get the joint ID from discord.Embed().author.url.
+
     Parameters
     -----------
     message : discord.Message
         The discord.Message object.
+
     Returns
     -------
-    int
-        The joint ID if found. Otherwise, None.
+    int | None
+        The joint ID if found, otherwise None.
     """
     if message.embeds:
         try:
@@ -560,7 +560,8 @@ def get_joint_id(message: discord.Message) -> typing.Optional[int]:
     return None
 
 
-def extract_block_timestamp(reason, id_):
+def extract_block_timestamp(reason: str, id_: int) -> tuple[re.Match[str] | None, float | None]:
+    """Extract block end timestamp from reason string."""
     # etc "blah blah blah... until <t:XX:f>."
     now = discord.utils.utcnow()
     end_time = re.search(r"until <t:(\d+):(?:R|f)>.$", reason)
@@ -569,7 +570,7 @@ def extract_block_timestamp(reason, id_):
         re.search(r"until ([^`]+?)\.$", reason),
         re.search(r"%([^%]+?)%", reason),
     ]
-    after = None
+    after: float | None = None
     if end_time is None:
         for i in attempts:
             if i is not None:
@@ -579,9 +580,7 @@ def extract_block_timestamp(reason, id_):
         if end_time is not None:
             # found a deprecated version
             try:
-                after = (
-                    datetime.fromisoformat(end_time.group(1)).replace(tzinfo=timezone.utc) - now
-                ).total_seconds()
+                after = (datetime.fromisoformat(end_time.group(1)).replace(tzinfo=UTC) - now).total_seconds()
             except ValueError:
                 logger.warning(
                     r"Broken block message for user %s, block and unblock again with a different message to prevent further issues",
@@ -595,7 +594,7 @@ def extract_block_timestamp(reason, id_):
     else:
         try:
             after = (
-                datetime.utcfromtimestamp(int(end_time.group(1))).replace(tzinfo=timezone.utc) - now
+                datetime.utcfromtimestamp(int(end_time.group(1))).replace(tzinfo=UTC) - now
             ).total_seconds()
         except ValueError:
             logger.warning(
@@ -607,40 +606,47 @@ def extract_block_timestamp(reason, id_):
     return end_time, after
 
 
-def return_or_truncate(text, max_length):
+def return_or_truncate(text: str, max_length: int) -> str:
+    """Return text if under max length, otherwise truncate with ellipsis."""
     if len(text) <= max_length:
         return text
     return text[: max_length - 3] + "..."
 
 
 class AcceptButton(discord.ui.Button):
-    def __init__(self, custom_id: str, emoji: str):
+    """Accept button for confirmation views."""
+
+    def __init__(self, custom_id: str, emoji: str) -> None:
         super().__init__(style=discord.ButtonStyle.gray, emoji=emoji, custom_id=custom_id)
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction: discord.Interaction) -> None:
         self.view.value = True
         await interaction.response.edit_message(view=None)
         self.view.stop()
 
 
 class DenyButton(discord.ui.Button):
-    def __init__(self, custom_id: str, emoji: str):
+    """Deny button for confirmation views."""
+
+    def __init__(self, custom_id: str, emoji: str) -> None:
         super().__init__(style=discord.ButtonStyle.gray, emoji=emoji, custom_id=custom_id)
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction: discord.Interaction) -> None:
         self.view.value = False
         await interaction.response.edit_message(view=None)
         self.view.stop()
 
 
 class ConfirmThreadCreationView(discord.ui.View):
-    def __init__(self):
+    """View for confirming thread creation."""
+
+    def __init__(self) -> None:
         # Match thread_creation_menu_timeout default (30s) for consistency in UX
         super().__init__(timeout=30)
-        self.value = None
+        self.value: bool | None = None
 
 
-def extract_forwarded_content(message) -> typing.Optional[str]:
+def extract_forwarded_content(message: discord.Message) -> str | None:
     """
     Extract forwarded message content from Discord forwarded messages.
 
@@ -651,11 +657,9 @@ def extract_forwarded_content(message) -> typing.Optional[str]:
 
     Returns
     -------
-    Optional[str]
+    str | None
         The extracted forwarded content, or None if not a forwarded message.
     """
-    import discord
-
     try:
         # Handle multi-forward (message_snapshots)
         if hasattr(message, "flags") and getattr(message.flags, "has_snapshot", False):
@@ -736,10 +740,8 @@ def extract_forwarded_content(message) -> typing.Optional[str]:
 
 
 class DummyParam:
-    """
-    A dummy parameter that can be used for MissingRequiredArgument.
-    """
+    """A dummy parameter that can be used for MissingRequiredArgument."""
 
-    def __init__(self, name):
+    def __init__(self, name: str) -> None:
         self.name = name
         self.displayed_name = name

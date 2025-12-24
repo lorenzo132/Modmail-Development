@@ -1,14 +1,23 @@
+from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+
 from discord.ext import commands
 
-from core.models import HostingMethod, PermissionLevel, getLogger
+from .models import HostingMethod, PermissionLevel, getLogger
 
 logger = getLogger(__name__)
 
 
+CheckPredicate = Callable[[commands.Context], Awaitable[bool]]
+CommandT = TypeVar("CommandT", bound=Callable[..., object])
+
+
 def has_permissions_predicate(
     permission_level: PermissionLevel = PermissionLevel.REGULAR,
-):
-    async def predicate(ctx):
+) -> CheckPredicate:
+    async def predicate(ctx: commands.Context) -> bool:
         return await check_permissions(ctx, ctx.command.qualified_name)
 
     predicate.permission_level = permission_level
@@ -37,7 +46,7 @@ def has_permissions(permission_level: PermissionLevel = PermissionLevel.REGULAR)
     return commands.check(has_permissions_predicate(permission_level))
 
 
-async def check_permissions(ctx, command_name) -> bool:
+async def check_permissions(ctx: commands.Context, command_name: str) -> bool:
     """Logic for checking permissions for a command for a user"""
     if await ctx.bot.is_owner(ctx.author) or ctx.author.id == ctx.bot.user.id:
         # Bot owner(s) (and creator) has absolute power over the bot
@@ -61,32 +70,36 @@ async def check_permissions(ctx, command_name) -> bool:
     command_permissions = ctx.bot.config["command_permissions"]
     checkables = {*ctx.author.roles, ctx.author}
 
-    if command_name in command_permissions:
+    if command_name in command_permissions and (
         # -1 is for @everyone
-        if -1 in command_permissions[command_name] or any(
-            str(check.id) in command_permissions[command_name] for check in checkables
-        ):
-            return True
+        -1 in command_permissions[command_name]
+        or any(str(check.id) in command_permissions[command_name] for check in checkables)
+    ):
+        return True
 
     level_permissions = ctx.bot.config["level_permissions"]
 
     for level in PermissionLevel:
-        if level >= permission_level and level.name in level_permissions:
-            # -1 is for @everyone
-            if -1 in level_permissions[level.name] or any(
-                str(check.id) in level_permissions[level.name] for check in checkables
-            ):
-                return True
+        if (
+            level >= permission_level
+            and level.name in level_permissions
+            and (
+                # -1 is for @everyone
+                -1 in level_permissions[level.name]
+                or any(str(check.id) in level_permissions[level.name] for check in checkables)
+            )
+        ):
+            return True
     return False
 
 
-def thread_only():
+def thread_only() -> Callable[[CommandT], CommandT]:
     """
     A decorator that checks if the command
     is being ran within a Modmail thread.
     """
 
-    async def predicate(ctx):
+    async def predicate(ctx: commands.Context) -> bool:
         """
         Parameters
         ----------
@@ -105,17 +118,16 @@ def thread_only():
     return commands.check(predicate)
 
 
-def github_token_required(ignore_if_not_heroku=False):
+def github_token_required(ignore_if_not_heroku: bool = False) -> Callable[[CommandT], CommandT]:
     """
     A decorator that ensures github token
     is set
     """
 
-    async def predicate(ctx):
+    async def predicate(ctx: commands.Context) -> bool:
         if ignore_if_not_heroku and ctx.bot.hosting_method != HostingMethod.HEROKU:
             return True
-        else:
-            return ctx.bot.config.get("github_token")
+        return bool(ctx.bot.config.get("github_token"))
 
     predicate.fail_msg = (
         "You can only use this command if you have a "
@@ -125,13 +137,13 @@ def github_token_required(ignore_if_not_heroku=False):
     return commands.check(predicate)
 
 
-def updates_enabled():
+def updates_enabled() -> Callable[[CommandT], CommandT]:
     """
     A decorator that ensures
     updates are enabled
     """
 
-    async def predicate(ctx):
+    async def predicate(ctx: commands.Context) -> bool:
         return not ctx.bot.config["disable_updates"]
 
     predicate.fail_msg = (

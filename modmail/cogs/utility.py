@@ -1,4 +1,5 @@
-from core.utils import trigger_typing, truncate
+from __future__ import annotations
+
 import asyncio
 import inspect
 import os
@@ -12,29 +13,25 @@ from itertools import takewhile, zip_longest
 from json import JSONDecodeError, loads
 from subprocess import PIPE
 from textwrap import indent
-from typing import Union
-import typing
+from typing import Any
 
 import discord
+from aiohttp import ClientResponseError
 from discord.enums import ActivityType, Status
 from discord.ext import commands, tasks
 from discord.ext.commands.view import StringView
-
-from aiohttp import ClientResponseError
 from packaging.version import Version
 
-from core import checks, utils
-from core.changelog import Changelog
-from core.models import (
+from modmail.core import checks, utils
+from modmail.core.changelog import Changelog
+from modmail.core.models import (
     HostingMethod,
     InvalidConfigError,
     PermissionLevel,
     UnseenFormatter,
     getLogger,
 )
-from core.utils import DummyParam
-from core.paginator import EmbedPaginatorSession, MessagePaginatorSession
-
+from modmail.core.paginator import EmbedPaginatorSession, MessagePaginatorSession
 
 logger = getLogger(__name__)
 
@@ -177,10 +174,7 @@ class ModmailHelpCommand(commands.HelpCommand):
         ):
             # BUG: fmt may run over the embed limit
             # TODO: paginate this
-            if length == i + 1:  # last
-                branch = "└─"
-            else:
-                branch = "├─"
+            branch = "└─" if length == i + 1 else "├─"  # last
             format_ += f"`{branch} {command.name}` - {command.short_doc}\n"
 
         embed.add_field(name="Sub Command(s)", value=format_[:1024], inline=False)
@@ -433,11 +427,10 @@ class Utility(commands.Cog):
         msg = "```Haskell\n"
 
         for line in logs.splitlines(keepends=True):
-            if msg != "```Haskell\n":
-                if len(line) + len(msg) + 3 > 2000:
-                    msg += "```"
-                    messages.append(msg)
-                    msg = "```Haskell\n"
+            if msg != "```Haskell\n" and len(line) + len(msg) + 3 > 2000:
+                msg += "```"
+                messages.append(msg)
+                msg = "```Haskell\n"
             msg += line
             if len(msg) + 3 > 2000:
                 msg = msg[:1992] + "[...]```"
@@ -539,12 +532,12 @@ class Utility(commands.Cog):
             return await ctx.send(embed=embed)
 
         if not message:
-            raise commands.MissingRequiredArgument(DummyParam("message"))
+            raise commands.MissingRequiredArgument(utils.DummyParam("message"))
 
         try:
             activity_type = ActivityType[activity_type]
-        except KeyError:
-            raise commands.MissingRequiredArgument(DummyParam("activity"))
+        except KeyError as exc:
+            raise commands.MissingRequiredArgument(utils.DummyParam("activity")) from exc
 
         activity, _ = await self.set_presence(activity_type=activity_type, activity_message=message)
 
@@ -588,8 +581,8 @@ class Utility(commands.Cog):
         status_type = status_type.replace(" ", "_")
         try:
             status = Status[status_type]
-        except KeyError:
-            raise commands.MissingRequiredArgument(DummyParam("status"))
+        except KeyError as exc:
+            raise commands.MissingRequiredArgument(utils.DummyParam("status")) from exc
 
         _, status = await self.set_presence(status=status)
 
@@ -680,7 +673,7 @@ class Utility(commands.Cog):
 
     @commands.command()
     @checks.has_permissions(PermissionLevel.ADMINISTRATOR)
-    async def mention(self, ctx, *user_or_role: Union[discord.Role, discord.Member, str]):
+    async def mention(self, ctx, *user_or_role: discord.Role | discord.Member | str):
         """
         Change what the bot mentions at the start of each thread.
 
@@ -856,7 +849,7 @@ class Utility(commands.Cog):
                 description=f"{key} is an invalid key.",
             )
             valid_keys = [f"`{k}`" for k in sorted(keys)]
-            embed.add_field(name="Valid keys", value=truncate(", ".join(valid_keys), 1024))
+            embed.add_field(name="Valid keys", value=utils.truncate(", ".join(valid_keys), 1024))
 
         return await ctx.send(embed=embed)
 
@@ -923,7 +916,7 @@ class Utility(commands.Cog):
             items = [(name, value) for name, value in config.items() if name in self.bot.config.public_keys]
 
             embeds: list[discord.Embed] = []
-            chunk: list[tuple[str, typing.Any]] = []
+            chunk: list[tuple[str, Any]] = []
             for pair in items:
                 chunk.append(pair)
                 if len(chunk) == 15:
@@ -1388,7 +1381,7 @@ class Utility(commands.Cog):
         type_: str.lower,
         name: str,
         *,
-        user_or_role: Union[discord.Role, utils.User, str],
+        user_or_role: discord.Role | utils.User | str,
     ):
         """
         Add a permission to a command or a permission level.
@@ -1473,7 +1466,7 @@ class Utility(commands.Cog):
         type_: str.lower,
         name: str,
         *,
-        user_or_role: Union[discord.Role, utils.User, str] = None,
+        user_or_role: discord.Role | utils.User | str = None,
     ):
         """
         Remove permission to use a command, permission level, or command level override.
@@ -1539,14 +1532,43 @@ class Utility(commands.Cog):
         value = self._verify_user_or_role(user_or_role)
         await self.bot.update_perms(level or name, value, add=False)
 
-        if type_ == "level":
-            if level > PermissionLevel.REGULAR:
-                if value == -1:
-                    logger.info("Denying @everyone access to Modmail category.")
+        if type_ == "level" and level > PermissionLevel.REGULAR:
+            if value == -1:
+                logger.info("Denying @everyone access to Modmail category.")
+                try:
+                    await self.bot.main_category.set_permissions(
+                        self.bot.modmail_guild.default_role, read_messages=False
+                    )
+                except discord.Forbidden:
+                    warn = discord.Embed(
+                        title="Missing Permissions",
+                        color=self.bot.error_color,
+                        description=(
+                            "I couldn't update the Modmail category permissions. "
+                            "Please grant me 'Manage Channels' and 'Manage Roles' for this category."
+                        ),
+                    )
+                    await ctx.send(embed=warn)
+            elif isinstance(user_or_role, discord.Role):
+                logger.info("Denying %s access to Modmail category.", user_or_role.name)
+                try:
+                    await self.bot.main_category.set_permissions(user_or_role, overwrite=None)
+                except discord.Forbidden:
+                    warn = discord.Embed(
+                        title="Missing Permissions",
+                        color=self.bot.error_color,
+                        description=(
+                            "I couldn't update the Modmail category permissions. "
+                            "Please grant me 'Manage Channels' and 'Manage Roles' for this category."
+                        ),
+                    )
+                    await ctx.send(embed=warn)
+            else:
+                member = self.bot.modmail_guild.get_member(value)
+                if member is not None and member != self.bot.modmail_guild.me:
+                    logger.info("Denying %s access to Modmail category.", member.name)
                     try:
-                        await self.bot.main_category.set_permissions(
-                            self.bot.modmail_guild.default_role, read_messages=False
-                        )
+                        await self.bot.main_category.set_permissions(member, overwrite=None)
                     except discord.Forbidden:
                         warn = discord.Embed(
                             title="Missing Permissions",
@@ -1557,36 +1579,6 @@ class Utility(commands.Cog):
                             ),
                         )
                         await ctx.send(embed=warn)
-                elif isinstance(user_or_role, discord.Role):
-                    logger.info("Denying %s access to Modmail category.", user_or_role.name)
-                    try:
-                        await self.bot.main_category.set_permissions(user_or_role, overwrite=None)
-                    except discord.Forbidden:
-                        warn = discord.Embed(
-                            title="Missing Permissions",
-                            color=self.bot.error_color,
-                            description=(
-                                "I couldn't update the Modmail category permissions. "
-                                "Please grant me 'Manage Channels' and 'Manage Roles' for this category."
-                            ),
-                        )
-                        await ctx.send(embed=warn)
-                else:
-                    member = self.bot.modmail_guild.get_member(value)
-                    if member is not None and member != self.bot.modmail_guild.me:
-                        logger.info("Denying %s access to Modmail category.", member.name)
-                        try:
-                            await self.bot.main_category.set_permissions(member, overwrite=None)
-                        except discord.Forbidden:
-                            warn = discord.Embed(
-                                title="Missing Permissions",
-                                color=self.bot.error_color,
-                                description=(
-                                    "I couldn't update the Modmail category permissions. "
-                                    "Please grant me 'Manage Channels' and 'Manage Roles' for this category."
-                                ),
-                            )
-                            await ctx.send(embed=warn)
 
         embed = discord.Embed(
             title="Success",
@@ -1638,7 +1630,7 @@ class Utility(commands.Cog):
     async def permissions_get(
         self,
         ctx,
-        user_or_role: Union[discord.Role, utils.User, str],
+        user_or_role: discord.Role | utils.User | str,
         *,
         name: str = None,
     ):
@@ -1691,10 +1683,8 @@ class Utility(commands.Cog):
                     levels.append(level.name)
 
             mention = getattr(user_or_role, "name", getattr(user_or_role, "id", user_or_role))
-            desc_cmd = ", ".join(map(lambda x: f"`{x}`", cmds)) if cmds else "No permission entries found."
-            desc_level = (
-                ", ".join(map(lambda x: f"`{x}`", levels)) if levels else "No permission entries found."
-            )
+            desc_cmd = ", ".join(f"`{x}`" for x in cmds) if cmds else "No permission entries found."
+            desc_level = ", ".join(f"`{x}`" for x in levels) if levels else "No permission entries found."
 
             embeds = [
                 discord.Embed(
@@ -1819,7 +1809,7 @@ class Utility(commands.Cog):
 
     @oauth.command(name="whitelist")
     @checks.has_permissions(PermissionLevel.OWNER)
-    async def oauth_whitelist(self, ctx, target: Union[discord.Role, utils.User]):
+    async def oauth_whitelist(self, ctx, target: discord.Role | utils.User):
         """
         Whitelist or un-whitelist a user or role to have access to logs.
 
@@ -2039,7 +2029,7 @@ class Utility(commands.Cog):
     @commands.command()
     @checks.has_permissions(PermissionLevel.OWNER)
     @checks.github_token_required()
-    @trigger_typing
+    @utils.trigger_typing
     async def github(self, ctx):
         """Shows the GitHub user your Github_Token is linked to."""
         data = await self.bot.api.get_user_info()
@@ -2061,7 +2051,7 @@ class Utility(commands.Cog):
     @checks.has_permissions(PermissionLevel.OWNER)
     @checks.github_token_required(ignore_if_not_heroku=True)
     @checks.updates_enabled()
-    @trigger_typing
+    @utils.trigger_typing
     async def update(self, ctx, *, flag: str = ""):
         """
         Update Modmail.
@@ -2131,7 +2121,7 @@ class Utility(commands.Cog):
 
                     embed.description = latest.description
                     for name, value in latest.fields.items():
-                        embed.add_field(name=name, value=truncate(value, 200))
+                        embed.add_field(name=name, value=utils.truncate(value, 200))
 
                     html_url = commit_data["html_url"]
                     short_sha = commit_data["sha"][:6]
@@ -2179,7 +2169,7 @@ class Utility(commands.Cog):
                     embed.set_footer(text=f"Updating Modmail v{self.bot.version} " f"-> v{latest.version}")
                     embed.description = latest.description
                     for name, value in latest.fields.items():
-                        embed.add_field(name=name, value=truncate(value, 200))
+                        embed.add_field(name=name, value=utils.truncate(value, 200))
 
                     if self.bot.hosting_method == HostingMethod.OTHER:
                         embed.description = (

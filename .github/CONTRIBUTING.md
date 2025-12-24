@@ -23,7 +23,7 @@ Pull requests are the best way to propose changes to the codebase. We actively w
 
 1. Fork the repo and create your branch from `master` or `development` according to Git Flow.
 2. Update the CHANGELOG.
-3. If you've changed `core/*` or `bot.py`, mark changelog as "BREAKING" since plugins may break.
+3. If you've changed `modmail/core/*`, `modmail/cogs/*`, or `bot.py`, mark changelog as "BREAKING" since plugins may break.
 4. Make sure your code passes the lint checks.
 5. Create Issues and pull requests!
 
@@ -58,7 +58,7 @@ Ways to help out:
 We use [black](https://github.com/python/black) for a unified code style.
 
 ## License
-By contributing, you agree that your contributions will be licensed under its MIT License.
+By contributing, you agree that your contributions will be licensed under the project's GNU Affero General Public License v3.0.
 
 ## References
 This document was adapted from the open-source contribution guidelines for [Facebook's Draft](https://github.com/facebook/draft-js/blob/a9316a723f9e918afde44dea68b5f9f39b7d9b00/CONTRIBUTING.md)

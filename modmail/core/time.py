@@ -7,14 +7,16 @@ https://github.com/Rapptz/RoboDanny/blob/rewrite/cogs/utils/time.py
 from __future__ import annotations
 
 import datetime
+import re
+from typing import TYPE_CHECKING, Any
+
 import discord
-from typing import TYPE_CHECKING, Any, Optional, Union
 import parsedatetime as pdt
 from dateutil.relativedelta import relativedelta
-from .utils import human_join
-from discord.ext import commands
 from discord import app_commands
-import re
+from discord.ext import commands
+
+from .utils import human_join
 
 # Monkey patch mins and secs into the units
 units = pdt.pdtLocales["en_US"].units
@@ -22,8 +24,9 @@ units["minutes"].append("mins")
 units["seconds"].append("secs")
 
 if TYPE_CHECKING:
+    from typing import Self
+
     from discord.ext.commands import Context
-    from typing_extensions import Self
 
 
 class plural:
@@ -59,18 +62,18 @@ class ShortTime:
 
     dt: datetime.datetime
 
-    def __init__(self, argument: str, *, now: Optional[datetime.datetime] = None):
+    def __init__(self, argument: str, *, now: datetime.datetime | None = None):
         match = self.compiled.fullmatch(argument)
         if match is None or not match.group(0):
             match = self.discord_fmt.fullmatch(argument)
             if match is not None:
-                self.dt = datetime.datetime.utcfromtimestamp(int(match.group("ts")), tz=datetime.timezone.utc)
+                self.dt = datetime.datetime.utcfromtimestamp(int(match.group("ts")), tz=datetime.UTC)
                 return
             else:
                 raise commands.BadArgument("invalid time provided")
 
         data = {k: int(v) for k, v in match.groupdict(default=0).items()}
-        now = now or datetime.datetime.now(datetime.timezone.utc)
+        now = now or datetime.datetime.now(datetime.UTC)
         self.dt = now + relativedelta(**data)
 
     @classmethod
@@ -81,7 +84,7 @@ class ShortTime:
 class HumanTime:
     calendar = pdt.Calendar(version=pdt.VERSION_CONTEXT_STYLE)
 
-    def __init__(self, argument: str, *, now: Optional[datetime.datetime] = None):
+    def __init__(self, argument: str, *, now: datetime.datetime | None = None):
         now = now or datetime.datetime.utcnow()
         dt, status = self.calendar.parseDT(argument, sourceTime=now)
         if not status.hasDateOrTime:
@@ -105,7 +108,7 @@ class HumanTime:
 
 
 class Time(HumanTime):
-    def __init__(self, argument: str, *, now: Optional[datetime.datetime] = None):
+    def __init__(self, argument: str, *, now: datetime.datetime | None = None):
         try:
             o = ShortTime(argument, now=now)
         except Exception:
@@ -116,7 +119,7 @@ class Time(HumanTime):
 
 
 class FutureTime(Time):
-    def __init__(self, argument: str, *, now: Optional[datetime.datetime] = None):
+    def __init__(self, argument: str, *, now: datetime.datetime | None = None):
         super().__init__(argument, now=now)
 
         if self._past:
@@ -143,7 +146,7 @@ class TimeTransformer(app_commands.Transformer):
             return short.dt
 
 
-# CHANGE: Added now
+# Wrapper used by UserFriendlyTime
 class FriendlyTimeResult:
     dt: datetime.datetime
     now: datetime.datetime
@@ -151,14 +154,9 @@ class FriendlyTimeResult:
 
     __slots__ = ("dt", "arg", "now")
 
-    def __init__(self, dt: datetime.datetime, now: datetime.datetime = None):
+    def __init__(self, dt: datetime.datetime, now: datetime.datetime | None = None):
         self.dt = dt
-        self.now = now
-
-        if now is None:
-            self.now = dt
-        else:
-            self.now = now
+        self.now = dt if now is None else now
 
         self.arg = ""
 
@@ -213,7 +211,7 @@ class UserFriendlyTime(commands.Converter):
 
     def __init__(
         self,
-        converter: Optional[Union[type[commands.Converter], commands.Converter]] = None,
+        converter: type[commands.Converter] | commands.Converter | None = None,
         *,
         default: Any = None,
     ):
@@ -223,10 +221,12 @@ class UserFriendlyTime(commands.Converter):
         if converter is not None and not isinstance(converter, commands.Converter):
             raise TypeError("commands.Converter subclass necessary.")
 
-        self.converter: commands.Converter = converter  # type: ignore  # It doesn't understand this narrowing
+        self.converter: commands.Converter | None = converter
         self.default: Any = default
 
-    async def convert(self, ctx: Context, argument: str, *, now=None) -> FriendlyTimeResult:
+    async def convert(
+        self, ctx: Context, argument: str, *, now: datetime.datetime | None = None
+    ) -> FriendlyTimeResult:
         calendar = HumanTime.calendar
         regex = ShortTime.compiled
         if now is None:
@@ -264,7 +264,7 @@ class UserFriendlyTime(commands.Converter):
             match = ShortTime.discord_fmt.match(argument)
             if match is not None:
                 result = FriendlyTimeResult(
-                    datetime.datetime.utcfromtimestamp(int(match.group("ts")), now, tz=datetime.timezone.utc)
+                    datetime.datetime.utcfromtimestamp(int(match.group("ts")), now, tz=datetime.UTC)
                 )
                 remaining = argument[match.end() :].strip()
                 await result.ensure_constraints(ctx, self, now, remaining)
@@ -275,10 +275,9 @@ class UserFriendlyTime(commands.Converter):
         if argument.endswith("from now"):
             argument = argument[:-8].strip()
 
-        if argument[0:2] == "me":
-            # starts with "me to", "me in", or "me at "
-            if argument[0:6] in ("me to ", "me in ", "me at "):
-                argument = argument[6:]
+        # starts with "me to", "me in", or "me at "
+        if argument[0:2] == "me" and argument[0:6] in ("me to ", "me in ", "me at "):
+            argument = argument[6:]
 
         elements = calendar.nlp(argument, sourceTime=now)
         if elements is None or len(elements) == 0:
@@ -335,7 +334,7 @@ class UserFriendlyTime(commands.Converter):
             await result.ensure_constraints(ctx, self, now, argument)
             return result
 
-        result = FriendlyTimeResult(dt.replace(tzinfo=datetime.timezone.utc), now)
+        result = FriendlyTimeResult(dt.replace(tzinfo=datetime.UTC), now)
         remaining = ""
 
         if begin in (0, 1):
@@ -360,17 +359,17 @@ class UserFriendlyTime(commands.Converter):
 def human_timedelta(
     dt: datetime.datetime,
     *,
-    source: Optional[datetime.datetime] = None,
-    accuracy: Optional[int] = 3,
+    source: datetime.datetime | None = None,
+    accuracy: int | None = 3,
     brief: bool = False,
     suffix: bool = True,
 ) -> str:
-    now = source or datetime.datetime.now(datetime.timezone.utc)
+    now = source or datetime.datetime.now(datetime.UTC)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.timezone.utc)
+        dt = dt.replace(tzinfo=datetime.UTC)
 
     if now.tzinfo is None:
-        now = now.replace(tzinfo=datetime.timezone.utc)
+        now = now.replace(tzinfo=datetime.UTC)
 
     # Microsecond free zone
     now = now.replace(microsecond=0)

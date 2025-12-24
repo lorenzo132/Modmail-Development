@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import io
 import json
 import os
 import shutil
 import sys
-import typing
 import zipfile
 from difflib import get_close_matches
 from importlib import invalidate_caches
@@ -17,10 +18,9 @@ import discord
 from discord.ext import commands
 from packaging.version import Version
 
-from core import checks
-from core.models import PermissionLevel, getLogger
-from core.paginator import EmbedPaginatorSession
-from core.utils import trigger_typing, truncate, safe_typing
+from modmail.core import checks, utils
+from modmail.core.models import PermissionLevel, getLogger
+from modmail.core.paginator import EmbedPaginatorSession
 
 logger = getLogger(__name__)
 
@@ -30,7 +30,13 @@ class InvalidPluginError(commands.BadArgument):
 
 
 class Plugin:
-    def __init__(self, user, repo=None, name=None, branch=None):
+    def __init__(
+        self,
+        user: str,
+        repo: str | None = None,
+        name: str | None = None,
+        branch: str | None = None,
+    ) -> None:
         if repo is None:
             self.user = "@local"
             self.repo = "@local"
@@ -49,17 +55,17 @@ class Plugin:
             self.link = f"https://github.com/{user}/{repo}/tree/{self.branch}/{name}"
 
     @property
-    def path(self):
+    def path(self) -> PurePath:
         if self.local:
             return PurePath("plugins") / "@local" / self.name
         return PurePath("plugins") / self.user / self.repo / f"{self.name}-{self.branch}"
 
     @property
-    def abs_path(self):
+    def abs_path(self) -> Path:
         return Path(__file__).absolute().parent.parent / self.path
 
     @property
-    def cache_path(self):
+    def cache_path(self) -> Path:
         if self.local:
             raise ValueError("No cache path for local plugins!")
         return (
@@ -70,21 +76,23 @@ class Plugin:
         )
 
     @property
-    def ext_string(self):
+    def ext_string(self) -> str:
         if self.local:
             return f"plugins.@local.{self.name}.{self.name}"
         return f"plugins.{self.user}.{self.repo}.{self.name}-{self.branch}.{self.name}"
 
-    def __str__(self):
+    def __str__(self) -> str:
         if self.local:
             return f"@local/{self.name}"
         return f"{self.user}/{self.repo}/{self.name}@{self.branch}"
 
-    def __lt__(self, other):
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, Plugin):
+            return NotImplemented
         return self.name.lower() < other.name.lower()
 
     @classmethod
-    def from_string(cls, s, strict=False):
+    def from_string(cls, s: str, strict: bool = False) -> Plugin:
         m = match(r"^@?local/(.+)$", s)
         if m is None:
             if not strict:
@@ -96,13 +104,13 @@ class Plugin:
             return Plugin(*m.groups())
         raise InvalidPluginError("Cannot decipher %s.", s)  # pylint: disable=raising-format-tuple
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.user, self.repo, self.name, self.branch))
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Plugins: {self.__str__()}>"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, Plugin) and self.__str__() == other.__str__()
 
 
@@ -134,7 +142,7 @@ class Plugins(commands.Cog):
         try:
             async with self.bot.session.get(url) as resp:
                 self.registry = json.loads(await resp.text())
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Failed to fetch registry. Loading with empty registry")
 
     async def initial_load_plugins(self):
@@ -234,8 +242,8 @@ class Plugins(commands.Cog):
         if req_txt.exists():
             # Install PIP requirements
 
-            venv = hasattr(sys, "real_prefix") or hasattr(sys, "base_prefix")  # in a virtual env
-            user_install = " --user" if not venv else ""
+            in_venv = hasattr(sys, "real_prefix") or sys.prefix != sys.base_prefix
+            user_install = " --user" if not in_venv else ""
             proc = await asyncio.create_subprocess_shell(
                 f'"{sys.executable}" -m pip install --upgrade{user_install} -r {req_txt} -q -q',
                 stderr=PIPE,
@@ -350,7 +358,7 @@ class Plugins(commands.Cog):
 
     @plugins.command(name="add", aliases=["install", "load"])
     @checks.has_permissions(PermissionLevel.OWNER)
-    @trigger_typing
+    @utils.trigger_typing
     async def plugins_add(self, ctx, *, plugin_name: str):
         """
         Install a new plugin for the bot.
@@ -492,7 +500,7 @@ class Plugins(commands.Cog):
             embed = discord.Embed(description="Plugin is not installed.", color=self.bot.error_color)
             return await ctx.send(embed=embed)
 
-        async with safe_typing(ctx):
+        async with utils.safe_typing(ctx):
             embed = discord.Embed(
                 description=f"Successfully updated {plugin.name}.",
                 color=self.bot.main_color,
@@ -635,7 +643,7 @@ class Plugins(commands.Cog):
 
     @plugins.group(invoke_without_command=True, name="registry", aliases=["list", "info"])
     @checks.has_permissions(PermissionLevel.OWNER)
-    async def plugins_registry(self, ctx, *, plugin_name: typing.Union[int, str] = None):
+    async def plugins_registry(self, ctx, *, plugin_name: int | str = None):
         """
         Shows a list of all approved plugins.
 
@@ -756,13 +764,13 @@ class Plugins(commands.Cog):
                 if limit < 0:
                     fmt = plugin.name
                     limit = 75
-                fmt = truncate(fmt, limit) + "[loaded]\n"
+                fmt = utils.truncate(fmt, limit) + "[loaded]\n"
             else:
                 limit = 75 - len(plugin_name) - 4 + len(name)
                 if limit < 0:
                     fmt = plugin.name
                     limit = 75
-                fmt = truncate(fmt, limit) + "\n"
+                fmt = utils.truncate(fmt, limit) + "\n"
 
             if len(fmt) + len(pages[-1]) <= 2048:
                 pages[-1] += fmt

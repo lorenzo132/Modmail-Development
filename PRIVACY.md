@@ -38,7 +38,7 @@ No tokens/passwords/private data is ever being collected or sent to our servers.
 
 This metadata is sent to our centralised servers every hour that the bot is up and can be viewed in the bot logs when the `log_level` is set to `DEBUG`.
 
-As our bot is completely open-source, the part that details this behaviour is located in `bot.py > ModmailBot > post_metadata`.
+As our bot is completely open-source, the part that details this behaviour is located in `modmail/bot/mixins_tasks.py > BotTasksMixin > post_metadata`.
 
 We assure you that the data is not being sold to anybody.
 

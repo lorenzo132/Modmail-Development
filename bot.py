@@ -1,125 +1,36 @@
-__version__ = "4.2.1"
+"""Legacy entrypoint and compatibility exports.
 
+The implementation has been modularized under the `modmail/` package.
+This module remains as a thin shim so existing deployments that:
 
-import asyncio
-import copy
-import hashlib
-import os
-import re
-import string
-import struct
-import sys
-import platform
-import typing
-from datetime import datetime, timezone
-from subprocess import PIPE
-from types import SimpleNamespace
+- run `python bot.py` (legacy)
+- run `python start.py` (recommended)
+- run `python -m modmail` (recommended)
+- import `ModmailBot` from `bot`
 
-import discord
-import isodate
-from aiohttp import ClientSession, ClientResponseError
-from discord.ext import commands, tasks
-from discord.ext.commands.view import StringView
-from emoji import is_emoji
-from packaging.version import Version
+continue to work without changes.
+"""
 
+from __future__ import annotations
 
-try:
-    # noinspection PyUnresolvedReferences
-    from colorama import init
+from modmail import __version__
+from modmail.bot import ModmailBot
+from modmail.entrypoint import main
+from modmail.runtime import set_windows_event_loop_policy, setup_colorama
 
-    init()
-except ImportError:
-    pass
+# Preserve legacy import-time side effects.
+setup_colorama()
+set_windows_event_loop_policy()
 
-from core import checks
-from core.changelog import Changelog
-from core.clients import ApiClient, MongoDBClient, PluginDatabaseClient
-from core.config import ConfigManager
-from core.models import (
-    DMDisabled,
-    HostingMethod,
-    InvalidConfigError,
-    PermissionLevel,
-    SafeFormatter,
-    configure_logging,
-    getLogger,
-)
-from core.thread import ThreadManager
-from core.time import human_timedelta
-from core.utils import (
-    extract_block_timestamp,
-    normalize_alias,
-    parse_alias,
-    truncate,
-    tryint,
-    human_join,
-    extract_forwarded_content,
-)
+__all__ = ["ModmailBot", "main", "__version__"]
 
-logger = getLogger(__name__)
+# NOTE: The original monolithic implementation used to live in this file.
+# It has been moved under the `modmail/` package. We keep the legacy source
+# below as a non-executed string to avoid breaking historical diffs while
+# ensuring this module remains a thin compatibility shim.
+_LEGACY_MONOLITH_SOURCE = r'''
 
-temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp")
-if not os.path.exists(temp_dir):
-    os.mkdir(temp_dir)
-
-if sys.platform == "win32":
-    try:
-        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    except AttributeError:
-        logger.error("Failed to use WindowsProactorEventLoopPolicy.", exc_info=True)
-
-
-class ModmailBot(commands.Bot):
-    def __init__(self):
-        self.config = ConfigManager(self)
-        self.config.populate_cache()
-
-        intents = discord.Intents.all()
-        if not self.config["enable_presence_intent"]:
-            intents.presences = False
-
-        super().__init__(command_prefix=None, intents=intents)  # implemented in `get_prefix`
-        self.session = None
-        self._api = None
-        self.formatter = SafeFormatter()
-        self.loaded_cogs = [
-            "cogs.modmail",
-            "cogs.plugins",
-            "cogs.utility",
-            "cogs.threadmenu",
-        ]
-        self._connected = None
-        self.start_time = discord.utils.utcnow()
-        self._started = False
-
-        self.threads = ThreadManager(self)
-        self._message_queues = {}  # User ID -> asyncio.Queue for message ordering
-
-        log_dir = os.path.join(temp_dir, "logs")
-        if not os.path.exists(log_dir):
-            os.mkdir(log_dir)
-        self.log_file_path = os.path.join(log_dir, "modmail.log")
-        configure_logging(self)
-
-        self.plugin_db = PluginDatabaseClient(self)  # Deprecated
-        self.startup()
-
-    def get_guild_icon(
-        self,
-        guild: typing.Optional[discord.Guild],
-        *,
-        size: typing.Optional[int] = None,
-    ) -> str:
-        if guild is None:
-            guild = self.guild
-        if guild.icon is None:
-            return "https://cdn.discordapp.com/embed/avatars/0.png"
-        if size is None:
-            return guild.icon.url
-        return guild.icon.with_size(size).url
-
-    def _resolve_snippet(self, name: str) -> typing.Optional[str]:
+    def _resolve_snippet(self, name: str) -> str | None:
         """
         Get actual snippet names from direct aliases to snippets.
 
@@ -309,7 +220,7 @@ class ModmailBot(commands.Bot):
         return await super().is_owner(user)
 
     @property
-    def log_channel(self) -> typing.Optional[discord.TextChannel]:
+    def log_channel(self) -> discord.TextChannel | None:
         channel_id = self.config["log_channel_id"]
         if channel_id is not None:
             try:
@@ -339,7 +250,7 @@ class ModmailBot(commands.Bot):
         return None
 
     @property
-    def mention_channel(self):
+    def mention_channel(self) -> discord.TextChannel | None:
         channel_id = self.config["mention_channel_id"]
         if channel_id is not None:
             try:
@@ -374,15 +285,15 @@ class ModmailBot(commands.Bot):
         await self.config.wait_until_ready()
 
     @property
-    def snippets(self) -> typing.Dict[str, str]:
+    def snippets(self) -> dict[str, str]:
         return self.config["snippets"]
 
     @property
-    def aliases(self) -> typing.Dict[str, str]:
+    def aliases(self) -> dict[str, str]:
         return self.config["aliases"]
 
     @property
-    def auto_triggers(self) -> typing.Dict[str, str]:
+    def auto_triggers(self) -> dict[str, str]:
         return self.config["auto_triggers"]
 
     @property
@@ -394,7 +305,7 @@ class ModmailBot(commands.Bot):
         return token
 
     @property
-    def guild_id(self) -> typing.Optional[int]:
+    def guild_id(self) -> int | None:
         guild_id = self.config["guild_id"]
         if guild_id is not None:
             try:
@@ -407,19 +318,13 @@ class ModmailBot(commands.Bot):
         return None
 
     @property
-    def guild(self) -> typing.Optional[discord.Guild]:
-        """
-        The guild that the bot is serving
-        (the server where users message it from)
-        """
+    def guild(self) -> discord.Guild | None:
+        """The guild that the bot is serving (the server where users message it from)"""
         return discord.utils.get(self.guilds, id=self.guild_id)
 
     @property
-    def modmail_guild(self) -> typing.Optional[discord.Guild]:
-        """
-        The guild that the bot is operating in
-        (where the bot is creating threads)
-        """
+    def modmail_guild(self) -> discord.Guild | None:
+        """The guild that the bot is operating in (where the bot is creating threads)"""
         modmail_guild_id = self.config["modmail_guild_id"]
         if modmail_guild_id is None:
             return self.guild
@@ -438,7 +343,7 @@ class ModmailBot(commands.Bot):
         return self.modmail_guild != self.guild
 
     @property
-    def main_category(self) -> typing.Optional[discord.CategoryChannel]:
+    def main_category(self) -> discord.CategoryChannel | None:
         if self.modmail_guild is not None:
             category_id = self.config["main_category_id"]
             if category_id is not None:
@@ -460,15 +365,15 @@ class ModmailBot(commands.Bot):
         return None
 
     @property
-    def blocked_users(self) -> typing.Dict[str, str]:
+    def blocked_users(self) -> dict[str, str]:
         return self.config["blocked"]
 
     @property
-    def blocked_roles(self) -> typing.Dict[str, str]:
+    def blocked_roles(self) -> dict[str, str]:
         return self.config["blocked_roles"]
 
     @property
-    def blocked_whitelisted_users(self) -> typing.List[str]:
+    def blocked_whitelisted_users(self) -> list[str]:
         return self.config["blocked_whitelist"]
 
     @property
@@ -667,16 +572,16 @@ class ModmailBot(commands.Bot):
         return self.get_user(id) or await self.fetch_user(id)
 
     @staticmethod
-    async def get_or_fetch_member(guild: discord.Guild, member_id: int) -> typing.Optional[discord.Member]:
+    async def get_or_fetch_member(guild: discord.Guild, member_id: int) -> discord.Member | None:
         """
         Attempt to get a member from cache; on failure fetch from the API.
 
         Returns:
-            The :obj:`discord.Member` or :obj:`None` to indicate the member could not be found.
+            The discord.Member or None to indicate the member could not be found.
         """
         return guild.get_member(member_id) or await guild.fetch_member(member_id)
 
-    async def retrieve_emoji(self) -> typing.Tuple[str, str]:
+    async def retrieve_emoji(self) -> tuple[str, str]:
         sent_emoji = self.config["sent_emoji"]
         blocked_emoji = self.config["blocked_emoji"]
 
@@ -805,7 +710,7 @@ class ModmailBot(commands.Bot):
         self,
         author: discord.User,
         *,
-        channel: discord.TextChannel = None,
+        channel: discord.TextChannel | None = None,
         send_message: bool = False,
     ) -> bool:
         member = self.guild.get_member(author.id)
@@ -888,8 +793,8 @@ class ModmailBot(commands.Bot):
 
     @staticmethod
     async def add_reaction(
-        msg,
-        reaction: typing.Union[discord.Emoji, discord.Reaction, discord.PartialEmoji, str],
+        msg: discord.Message,
+        reaction: discord.Emoji | discord.Reaction | discord.PartialEmoji | str,
     ) -> bool:
         if reaction != "disable":
             try:
@@ -1412,7 +1317,7 @@ class ModmailBot(commands.Bot):
         return ctx
 
     async def update_perms(
-        self, name: typing.Union[PermissionLevel, str], value: int, add: bool = True
+        self, name: PermissionLevel | str, value: int, add: bool = True
     ) -> None:
         if value != -1:
             value = str(value)
@@ -2215,51 +2120,9 @@ class ModmailBot(commands.Bot):
         return new_name
 
 
-def main():
-    try:
-        # noinspection PyUnresolvedReferences
-        import uvloop  # type: ignore
-
-        logger.debug("Setting up with uvloop.")
-        uvloop.install()
-    except ImportError:
-        pass
-
-    try:
-        import cairosvg  # noqa: F401
-    except OSError:
-        if os.name == "nt":
-            if struct.calcsize("P") * 8 != 64:
-                logger.error(
-                    "Unable to import cairosvg, ensure your Python is a 64-bit version: https://www.python.org/downloads/"
-                )
-            else:
-                logger.error(
-                    "Unable to import cairosvg, install GTK Installer for Windows and restart your system (https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases/latest)"
-                )
-        else:
-            if "ubuntu" in platform.version().lower() or "debian" in platform.version().lower():
-                logger.error(
-                    "Unable to import cairosvg, try running `sudo apt-get install libpangocairo-1.0-0` or report on our support server with your OS details: https://discord.gg/etJNHCQ"
-                )
-            else:
-                logger.error(
-                    "Unable to import cairosvg, report on our support server with your OS details: https://discord.gg/etJNHCQ"
-                )
-        sys.exit(0)
-
-    # check discord version
-    discord_version = "2.6.3"
-    if discord.__version__ != discord_version:
-        logger.error(
-            "Dependencies are not updated, run pipenv install. discord.py version expected %s, received %s",
-            discord_version,
-            discord.__version__,
-        )
-        sys.exit(0)
-
-    bot = ModmailBot()
-    bot.run()
+if __name__ == "__main__":
+    main()
+'''
 
 
 if __name__ == "__main__":

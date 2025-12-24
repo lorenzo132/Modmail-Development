@@ -7,14 +7,14 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11']
+        python-version: ['3.12', '3.13']
 
     name: Python ${{ matrix.python-version }} on ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
         architecture: x64
@@ -26,8 +26,12 @@ jobs:
     # - name: Bandit syntax check
     #   run: bandit -r . -b .bandit_baseline.json
     - name: Pylint
-      run: pylint ./bot.py cogs/*.py core/*.py  --exit-zero -r y
+      run: pylint ./bot.py ./modmail --exit-zero -r y
       continue-on-error: true
+    - name: Ruff
+      run: ruff check .
     - name: Black
       run: |
         black . --diff --check
+    - name: Compile
+      run: python -m compileall -q .
