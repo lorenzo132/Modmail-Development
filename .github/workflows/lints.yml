@@ -22,6 +22,12 @@ jobs:
       run: |
         python -m pip install --upgrade pip pipenv
         pipenv install --dev --system
+
+    - name: Ensure lint tools available
+      run: |
+        python -m pip install --upgrade \
+          ruff==0.8.4 \
+          black==23.11.0
     # to refresh: bandit -f json -o .bandit_baseline.json -r . 
     # - name: Bandit syntax check
     #   run: bandit -r . -b .bandit_baseline.json
